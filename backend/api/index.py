@@ -48,6 +48,9 @@ def _customer_dict(row) -> dict:
         'vouchers': row['vouchers'],
         'purchases': row['purchases'],
         'joined': str(row['joined']),
+        'productName': row['product_name'] or '',
+        'purchaseAmount': float(row['purchase_amount']) if row['purchase_amount'] is not None else 0,
+        'purchaseDate': str(row['purchase_date']) if row['purchase_date'] else '',
     }
 
 
@@ -117,12 +120,17 @@ def handler(event: dict, context) -> dict:
             birth = body.get('birth') or None
             ref_id = body.get('refId')
             ref_id = int(ref_id) if (ctype == 'second' and ref_id) else None
+            product_name = (body.get('productName') or '').strip() or None
+            purchase_amount = body.get('purchaseAmount')
+            purchase_amount = float(purchase_amount) if purchase_amount not in (None, '') else None
+            purchase_date = body.get('purchaseDate') or None
 
             vouchers = VOUCHERS_PER_BATCH if ctype == 'first' else 0
             cur.execute(
-                """INSERT INTO customers (seller_id, name, phone, birth, type, ref_id, vouchers)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *""",
-                (seller_id, name, phone, birth, ctype, ref_id, vouchers),
+                """INSERT INTO customers
+                   (seller_id, name, phone, birth, type, ref_id, vouchers, product_name, purchase_amount, purchase_date)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE)) RETURNING *""",
+                (seller_id, name, phone, birth, ctype, ref_id, vouchers, product_name, purchase_amount, purchase_date),
             )
             new_row = cur.fetchone()
 

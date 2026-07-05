@@ -29,6 +29,9 @@ type Customer = {
   vouchers: number;
   purchases: number;
   joined: string;
+  productName: string;
+  purchaseAmount: number;
+  purchaseDate: string;
 };
 
 const nav = [
@@ -40,7 +43,15 @@ const nav = [
 
 type NavKey = (typeof nav)[number]['key'];
 type Stats = { totalTemp: number; totalLife: number; totalVouchers: number };
-type Form = { name: string; phone: string; birth: string; type: 'first' | 'second'; refId: string };
+type Form = {
+  name: string; phone: string; birth: string; type: 'first' | 'second'; refId: string;
+  productName: string; purchaseAmount: string; purchaseDate: string;
+};
+
+const EMPTY_FORM: Form = {
+  name: '', phone: '', birth: '', type: 'first', refId: '',
+  productName: '', purchaseAmount: '', purchaseDate: '',
+};
 
 export default function Index() {
   const [sellerId, setSellerId] = useState<number | null>(() => {
@@ -53,7 +64,7 @@ export default function Index() {
   const [tab, setTab] = useState<NavKey>('customers');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState<Form>({ name: '', phone: '', birth: '', type: 'first', refId: '' });
+  const [form, setForm] = useState<Form>(EMPTY_FORM);
 
   const authed = sellerId !== null;
   const firsts = customers.filter((c) => c.type === 'first');
@@ -141,7 +152,7 @@ export default function Index() {
       }
       await loadCustomers(sellerId as number);
       setAddOpen(false);
-      setForm({ name: '', phone: '', birth: '', type: 'first', refId: '' });
+      setForm(EMPTY_FORM);
     } catch {
       toast.error('Сервер недоступен');
     } finally {
@@ -324,6 +335,9 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
                 <th className="px-4 py-3 font-medium">Телефон</th>
                 <th className="px-4 py-3 font-medium">Тип</th>
                 <th className="px-4 py-3 font-medium">Пригласил</th>
+                <th className="px-4 py-3 font-medium">Товар</th>
+                <th className="px-4 py-3 font-medium text-right">Объём, ₽</th>
+                <th className="px-4 py-3 font-medium">Дата покупки</th>
                 <th className="px-4 py-3 font-medium text-right">Покупки</th>
                 <th className="px-4 py-3 font-medium text-right">Врем. баллы</th>
                 <th className="px-4 py-3 font-medium text-right">Пожизн.</th>
@@ -340,6 +354,9 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{refName(c.refId)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{c.productName || '—'}</td>
+                  <td className="px-4 py-3 text-right tabular">{c.purchaseAmount ? c.purchaseAmount.toLocaleString('ru') : '—'}</td>
+                  <td className="px-4 py-3 tabular text-muted-foreground">{c.purchaseDate || '—'}</td>
                   <td className="px-4 py-3 text-right tabular">{c.purchases}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold">{c.tempPoints}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold text-accent">{c.lifePoints.toFixed(1)}</td>
@@ -516,6 +533,20 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, firsts, bu
               </select>
             </div>
           )}
+          <div className="space-y-1.5">
+            <Label>Наименование товара</Label>
+            <Input value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} placeholder="Например, кроссовки Air Max" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Объём покупки, ₽</Label>
+              <Input type="number" min="0" value={form.purchaseAmount} onChange={(e) => setForm({ ...form, purchaseAmount: e.target.value })} placeholder="0" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Дата покупки</Label>
+              <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
+            </div>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setAddOpen(false)} disabled={busy}>Отмена</Button>
