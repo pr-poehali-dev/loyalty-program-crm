@@ -6,9 +6,10 @@ import psycopg2.extras
 
 
 RUB = 100
-LIFETIME_RATE = 0.1
 LIFETIME_CAP = 30
 VOUCHERS_PER_BATCH = 5
+POINTS_PER_AMOUNT = 1000  # 1 балл за каждую 1000 ₽ покупки
+LIFETIME_SHARE = 0.1  # доля временных баллов, уходящая в пожизненные
 
 CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -43,7 +44,7 @@ def _customer_dict(row) -> dict:
         'birth': str(row['birth']) if row['birth'] else '',
         'type': row['type'],
         'refId': row['ref_id'],
-        'tempPoints': row['temp_points'],
+        'tempPoints': float(row['temp_points']),
         'lifePoints': float(row['life_points']),
         'vouchers': row['vouchers'],
         'purchases': row['purchases'],
@@ -135,6 +136,7 @@ def handler(event: dict, context) -> dict:
             new_row = cur.fetchone()
 
             notify = None
+            earned_points = None
             if ref_id:
                 cur.execute(
                     "SELECT name, temp_points, life_points FROM customers WHERE id = %s AND seller_id = %s",
@@ -142,14 +144,17 @@ def handler(event: dict, context) -> dict:
                 )
                 ref = cur.fetchone()
                 if ref:
-                    new_life = min(float(ref['life_points']) + LIFETIME_RATE, LIFETIME_CAP)
+                    amount = purchase_amount or 0
+                    earned_points = round(max(amount / POINTS_PER_AMOUNT, 1) if amount > 0 else 1, 1)
+                    new_temp = round(float(ref['temp_points']) + earned_points, 1)
+                    new_life = min(round(float(ref['life_points']) + earned_points * LIFETIME_SHARE, 1), LIFETIME_CAP)
                     cur.execute(
-                        "UPDATE customers SET temp_points = temp_points + 1, life_points = %s WHERE id = %s",
-                        (round(new_life, 1), ref_id),
+                        "UPDATE customers SET temp_points = %s, life_points = %s WHERE id = %s",
+                        (new_temp, new_life, ref_id),
                     )
                     notify = ref['name'].split(' ')[0]
 
-            return _resp(200, {'customer': _customer_dict(new_row), 'notify': notify})
+            return _resp(200, {'customer': _customer_dict(new_row), 'notify': notify, 'earnedPoints': earned_points})
 
         if method == 'POST' and action == 'spend_voucher':
             cid = int(body.get('id'))

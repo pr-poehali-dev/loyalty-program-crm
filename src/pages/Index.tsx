@@ -146,7 +146,8 @@ export default function Index() {
         return;
       }
       if (data.notify) {
-        toast.success(`Первому покупателю «${data.notify}» начислен 1 балл. Отправлен PUSH.`, { icon: '🔔' });
+        const pts = data.earnedPoints ?? 1;
+        toast.success(`Первому покупателю «${data.notify}» начислено ${pts} ${pts === 1 ? 'балл' : 'баллов'}. Отправлен PUSH.`, { icon: '🔔' });
       } else {
         toast.success('Покупатель добавлен, выдано 5 фиолок');
       }
@@ -323,7 +324,7 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
         <Stat icon="Users" label="Всего покупателей" value={customers.length} />
         <Stat icon="Crown" label="Первые покупатели" value={firsts.length} />
         <Stat icon="Network" label="Вторые покупатели" value={seconds.length} />
-        <Stat icon="Coins" label="Временных баллов" value={stats.totalTemp} accent />
+        <Stat icon="Coins" label="Временных баллов" value={stats.totalTemp.toFixed(1)} accent />
       </div>
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -358,7 +359,7 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
                   <td className="px-4 py-3 text-right tabular">{c.purchaseAmount ? c.purchaseAmount.toLocaleString('ru') : '—'}</td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.purchaseDate || '—'}</td>
                   <td className="px-4 py-3 text-right tabular">{c.purchases}</td>
-                  <td className="px-4 py-3 text-right tabular font-semibold">{c.tempPoints}</td>
+                  <td className="px-4 py-3 text-right tabular font-semibold">{c.tempPoints.toFixed(1)}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold text-accent">{c.lifePoints.toFixed(1)}</td>
                 </tr>
               ))}
@@ -376,11 +377,11 @@ function Points({ customers, stats }: { customers: Customer[]; stats: Stats }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold font-display">Баллы лояльности</h1>
-        <p className="text-sm text-muted-foreground">1 балл = {RUB} ₽ · пожизненные лимит {LIFETIME_CAP}</p>
+        <p className="text-sm text-muted-foreground">1 балл = {RUB} ₽ · начисление 1 балл за каждую 1000 ₽ покупки · пожизненные лимит {LIFETIME_CAP}</p>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <Stat icon="Coins" label="Временные баллы" value={stats.totalTemp} />
+        <Stat icon="Coins" label="Временные баллы" value={stats.totalTemp.toFixed(1)} />
         <Stat icon="Infinity" label="Пожизненные баллы" value={stats.totalLife.toFixed(1)} accent />
         <Stat icon="Wallet" label="Эквивалент, ₽" value={(stats.totalTemp * RUB).toLocaleString('ru')} />
       </div>
@@ -397,7 +398,7 @@ function Points({ customers, stats }: { customers: Customer[]; stats: Stats }) {
                 <div className="flex items-center justify-between mb-2 gap-3">
                   <span className="font-medium">{c.name}</span>
                   <div className="flex gap-4 text-sm shrink-0">
-                    <span className="tabular"><span className="text-muted-foreground">врем.</span> <b>{c.tempPoints}</b></span>
+                    <span className="tabular"><span className="text-muted-foreground">врем.</span> <b>{c.tempPoints.toFixed(1)}</b></span>
                     <span className="tabular text-accent"><span className="text-muted-foreground">пожизн.</span> <b>{c.lifePoints.toFixed(1)}</b></span>
                   </div>
                 </div>
