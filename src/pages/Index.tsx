@@ -471,9 +471,9 @@ function Profile({ email, logout, stats, count }: {
   );
 }
 
-function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, firsts }: {
+function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, firsts, busy }: {
   addOpen: boolean; setAddOpen: (v: boolean) => void;
-  form: Form; setForm: (v: Form) => void; addCustomer: () => void; firsts: Customer[];
+  form: Form; setForm: (v: Form) => void; addCustomer: () => void; firsts: Customer[]; busy: boolean;
 }) {
   return (
     <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -518,8 +518,10 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, firsts }: 
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setAddOpen(false)}>Отмена</Button>
-          <Button onClick={addCustomer}>Сохранить</Button>
+          <Button variant="outline" onClick={() => setAddOpen(false)} disabled={busy}>Отмена</Button>
+          <Button onClick={addCustomer} disabled={busy}>
+            {busy ? 'Сохранение…' : 'Сохранить'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
