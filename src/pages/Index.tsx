@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,8 +12,8 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 
+const API_URL = 'https://functions.poehali.dev/b9bed241-7334-4e64-ac69-6070b9e58504';
 const RUB = 100;
-const LIFETIME_RATE = 0.1;
 const LIFETIME_CAP = 30;
 const VOUCHERS_PER_BATCH = 5;
 
@@ -31,14 +31,6 @@ type Customer = {
   joined: string;
 };
 
-const seed: Customer[] = [
-  { id: 1, name: 'Соколова Марина Викторовна', phone: '+7 921 445-12-08', birth: '1985-03-14', type: 'first', refId: null, tempPoints: 4, lifePoints: 0.4, vouchers: 1, purchases: 6, joined: '2026-05-12' },
-  { id: 2, name: 'Дёмин Артём Сергеевич', phone: '+7 916 220-77-31', birth: '1990-11-02', type: 'first', refId: null, tempPoints: 2, lifePoints: 0.2, vouchers: 3, purchases: 4, joined: '2026-06-01' },
-  { id: 3, name: 'Гладышева Ольга Петровна', phone: '+7 903 118-45-90', birth: '1978-07-22', type: 'second', refId: 1, tempPoints: 0, lifePoints: 0, vouchers: 0, purchases: 2, joined: '2026-06-08' },
-  { id: 4, name: 'Кузьмин Илья Романович', phone: '+7 999 334-01-56', birth: '1995-01-30', type: 'second', refId: 1, tempPoints: 0, lifePoints: 0, vouchers: 0, purchases: 1, joined: '2026-06-15' },
-  { id: 5, name: 'Белова Наталья Юрьевна', phone: '+7 927 556-88-12', birth: '1982-09-09', type: 'second', refId: 2, tempPoints: 0, lifePoints: 0, vouchers: 0, purchases: 3, joined: '2026-06-20' },
-];
-
 const nav = [
   { key: 'customers', label: 'Покупатели', icon: 'Users' },
   { key: 'points', label: 'Баллы', icon: 'Coins' },
@@ -51,14 +43,19 @@ type Stats = { totalTemp: number; totalLife: number; totalVouchers: number };
 type Form = { name: string; phone: string; birth: string; type: 'first' | 'second'; refId: string };
 
 export default function Index() {
-  const [authed, setAuthed] = useState(false);
-  const [email, setEmail] = useState('');
+  const [sellerId, setSellerId] = useState<number | null>(() => {
+    const v = localStorage.getItem('sellerId');
+    return v ? Number(v) : null;
+  });
+  const [email, setEmail] = useState(() => localStorage.getItem('sellerEmail') || '');
   const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<NavKey>('customers');
-  const [customers, setCustomers] = useState<Customer[]>(seed);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', birth: '', type: 'first' as 'first' | 'second', refId: '' });
+  const [form, setForm] = useState<Form>({ name: '', phone: '', birth: '', type: 'first', refId: '' });
 
+  const authed = sellerId !== null;
   const firsts = customers.filter((c) => c.type === 'first');
   const seconds = customers.filter((c) => c.type === 'second');
 
@@ -69,55 +66,109 @@ export default function Index() {
     return { totalTemp, totalLife, totalVouchers };
   }, [customers]);
 
-  const login = () => {
+  const loadCustomers = async (sid: number) => {
+    try {
+      const res = await fetch(API_URL, { headers: { 'X-Seller-Id': String(sid) } });
+      const data = await res.json();
+      if (res.ok) setCustomers(data.customers || []);
+    } catch {
+      toast.error('Не удалось загрузить данные');
+    }
+  };
+
+  useEffect(() => {
+    if (sellerId !== null) loadCustomers(sellerId);
+  }, [sellerId]);
+
+  const login = async () => {
     if (!email.includes('@') || pass.length < 3) {
       toast.error('Введите корректный email и пароль');
       return;
     }
-    setAuthed(true);
-    toast.success('Добро пожаловать в систему');
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}?action=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: pass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Ошибка входа');
+        return;
+      }
+      localStorage.setItem('sellerId', String(data.id));
+      localStorage.setItem('sellerEmail', data.email);
+      setSellerId(data.id);
+      setEmail(data.email);
+      setPass('');
+      toast.success('Добро пожаловать в систему');
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const addCustomer = () => {
+  const logout = () => {
+    localStorage.removeItem('sellerId');
+    localStorage.removeItem('sellerEmail');
+    setSellerId(null);
+    setCustomers([]);
+  };
+
+  const addCustomer = async () => {
     if (!form.name || !form.phone) {
       toast.error('Заполните Ф.И.О. и телефон');
       return;
     }
-    const id = Math.max(0, ...customers.map((c) => c.id)) + 1;
-    const refId = form.type === 'second' && form.refId ? Number(form.refId) : null;
-    const next: Customer = {
-      id, name: form.name, phone: form.phone, birth: form.birth,
-      type: form.type, refId, tempPoints: 0, lifePoints: 0,
-      vouchers: form.type === 'first' ? VOUCHERS_PER_BATCH : 0,
-      purchases: 1, joined: new Date().toISOString().slice(0, 10),
-    };
-    let updated = [...customers, next];
-    if (refId) {
-      updated = updated.map((c) => {
-        if (c.id === refId) {
-          const temp = c.tempPoints + 1;
-          const life = Math.min(c.lifePoints + LIFETIME_RATE, LIFETIME_CAP);
-          toast.success(`Первому покупателю «${c.name.split(' ')[0]}» начислен 1 балл. Отправлен PUSH.`, { icon: '🔔' });
-          return { ...c, tempPoints: temp, lifePoints: Number(life.toFixed(1)) };
-        }
-        return c;
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}?action=add_customer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify(form),
       });
-    } else {
-      toast.success('Покупатель добавлен, выдано 5 фиолок');
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Ошибка сохранения');
+        return;
+      }
+      if (data.notify) {
+        toast.success(`Первому покупателю «${data.notify}» начислен 1 балл. Отправлен PUSH.`, { icon: '🔔' });
+      } else {
+        toast.success('Покупатель добавлен, выдано 5 фиолок');
+      }
+      await loadCustomers(sellerId as number);
+      setAddOpen(false);
+      setForm({ name: '', phone: '', birth: '', type: 'first', refId: '' });
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setBusy(false);
     }
-    setCustomers(updated);
-    setAddOpen(false);
-    setForm({ name: '', phone: '', birth: '', type: 'first', refId: '' });
   };
 
-  const spendVoucher = (id: number) => {
-    setCustomers((cs) =>
-      cs.map((c) => (c.id === id && c.vouchers > 0 ? { ...c, vouchers: c.vouchers - 1 } : c))
-    );
-    toast.success('Фиолка списана');
+  const spendVoucher = async (id: number) => {
+    try {
+      const res = await fetch(`${API_URL}?action=spend_voucher`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Нет доступных фиолок');
+        return;
+      }
+      await loadCustomers(sellerId as number);
+      toast.success('Фиолка списана');
+    } catch {
+      toast.error('Сервер недоступен');
+    }
   };
 
-  if (!authed) return <Login {...{ email, setEmail, pass, setPass, login }} />;
+  if (!authed) return <Login {...{ email, setEmail, pass, setPass, login, busy }} />;
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans flex flex-col">
@@ -130,18 +181,18 @@ export default function Index() {
           )}
           {tab === 'points' && <Points customers={customers} stats={stats} />}
           {tab === 'vouchers' && <Vouchers firsts={firsts} spendVoucher={spendVoucher} />}
-          {tab === 'profile' && <Profile email={email} setAuthed={setAuthed} stats={stats} count={customers.length} />}
+          {tab === 'profile' && <Profile email={email} logout={logout} stats={stats} count={customers.length} />}
         </main>
       </div>
       <MobileNav tab={tab} setTab={setTab} />
-      <AddDialog {...{ addOpen, setAddOpen, form, setForm, addCustomer, firsts }} />
+      <AddDialog {...{ addOpen, setAddOpen, form, setForm, addCustomer, firsts, busy }} />
     </div>
   );
 }
 
-function Login({ email, setEmail, pass, setPass, login }: {
+function Login({ email, setEmail, pass, setPass, login, busy }: {
   email: string; setEmail: (v: string) => void;
-  pass: string; setPass: (v: string) => void; login: () => void;
+  pass: string; setPass: (v: string) => void; login: () => void; busy: boolean;
 }) {
   return (
     <div className="min-h-screen grid-bg bg-primary flex items-center justify-center p-4">
@@ -162,11 +213,12 @@ function Login({ email, setEmail, pass, setPass, login }: {
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Пароль</Label>
             <Input value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" type="password" onKeyDown={(e) => e.key === 'Enter' && login()} />
           </div>
-          <Button className="w-full" onClick={login}>
-            <Icon name="LogIn" size={16} className="mr-2" /> Войти в систему
+          <Button className="w-full" onClick={login} disabled={busy}>
+            <Icon name={busy ? 'Loader2' : 'LogIn'} size={16} className={`mr-2 ${busy ? 'animate-spin' : ''}`} />
+            {busy ? 'Вход…' : 'Войти в систему'}
           </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground text-center mt-6">Доступ только для авторизованных продавцов</p>
+        <p className="text-[11px] text-muted-foreground text-center mt-6">Демо-доступ: seller@company.ru / demo123</p>
       </div>
     </div>
   );
@@ -382,8 +434,8 @@ function Vouchers({ firsts, spendVoucher }: { firsts: Customer[]; spendVoucher: 
   );
 }
 
-function Profile({ email, setAuthed, stats, count }: {
-  email: string; setAuthed: (v: boolean) => void; stats: Stats; count: number;
+function Profile({ email, logout, stats, count }: {
+  email: string; logout: () => void; stats: Stats; count: number;
 }) {
   return (
     <div className="space-y-6 max-w-2xl">
@@ -412,7 +464,7 @@ function Profile({ email, setAuthed, stats, count }: {
           </div>
         ))}
       </div>
-      <Button variant="outline" onClick={() => setAuthed(false)}>
+      <Button variant="outline" onClick={logout}>
         <Icon name="LogOut" size={16} className="mr-2" /> Выйти
       </Button>
     </div>

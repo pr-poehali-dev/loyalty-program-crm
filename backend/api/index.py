@@ -1,0 +1,161 @@
+import json
+import os
+import hashlib
+import psycopg2
+import psycopg2.extras
+
+
+RUB = 100
+LIFETIME_RATE = 0.1
+LIFETIME_CAP = 30
+VOUCHERS_PER_BATCH = 5
+
+CORS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Seller-Id',
+    'Access-Control-Max-Age': '86400',
+}
+
+
+def _conn():
+    return psycopg2.connect(os.environ['DATABASE_URL'])
+
+
+def _hash(pw: str) -> str:
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+
+def _resp(status: int, body: dict):
+    return {
+        'statusCode': status,
+        'headers': {**CORS, 'Content-Type': 'application/json'},
+        'isBase64Encoded': False,
+        'body': json.dumps(body, default=str),
+    }
+
+
+def _customer_dict(row) -> dict:
+    return {
+        'id': row['id'],
+        'name': row['name'],
+        'phone': row['phone'],
+        'birth': str(row['birth']) if row['birth'] else '',
+        'type': row['type'],
+        'refId': row['ref_id'],
+        'tempPoints': row['temp_points'],
+        'lifePoints': float(row['life_points']),
+        'vouchers': row['vouchers'],
+        'purchases': row['purchases'],
+        'joined': str(row['joined']),
+    }
+
+
+def handler(event: dict, context) -> dict:
+    '''Бэкенд CRM программы лояльности: вход продавца, покупатели, баллы, фиолки.'''
+    method = event.get('httpMethod', 'GET')
+    if method == 'OPTIONS':
+        return {'statusCode': 200, 'headers': CORS, 'isBase64Encoded': False, 'body': ''}
+
+    params = event.get('queryStringParameters') or {}
+    action = params.get('action', '')
+    headers = event.get('headers', {})
+    seller_id = headers.get('X-Seller-Id') or headers.get('x-seller-id')
+
+    conn = _conn()
+    conn.autocommit = True
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    try:
+        body = json.loads(event.get('body') or '{}')
+
+        if method == 'POST' and action == 'login':
+            email = (body.get('email') or '').strip().lower()
+            password = body.get('password') or ''
+            cur.execute("SELECT id, email, name, password_hash FROM sellers WHERE email = %s", (email,))
+            seller = cur.fetchone()
+            if not seller:
+                return _resp(401, {'error': 'Продавец не найден'})
+            ok = seller['password_hash'] == password or seller['password_hash'] == _hash(password)
+            if not ok:
+                return _resp(401, {'error': 'Неверный пароль'})
+            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name']})
+
+        if method == 'POST' and action == 'register':
+            email = (body.get('email') or '').strip().lower()
+            password = body.get('password') or ''
+            if '@' not in email or len(password) < 3:
+                return _resp(400, {'error': 'Некорректный email или короткий пароль'})
+            cur.execute("SELECT id FROM sellers WHERE email = %s", (email,))
+            if cur.fetchone():
+                return _resp(409, {'error': 'Продавец с таким email уже существует'})
+            cur.execute(
+                "INSERT INTO sellers (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id, email, name",
+                (email, _hash(password), body.get('name') or 'Продавец'),
+            )
+            seller = cur.fetchone()
+            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name']})
+
+        if not seller_id:
+            return _resp(401, {'error': 'Требуется авторизация'})
+        seller_id = int(seller_id)
+
+        if method == 'GET':
+            cur.execute(
+                "SELECT * FROM customers WHERE seller_id = %s ORDER BY id",
+                (seller_id,),
+            )
+            rows = cur.fetchall()
+            return _resp(200, {'customers': [_customer_dict(r) for r in rows]})
+
+        if method == 'POST' and action == 'add_customer':
+            name = (body.get('name') or '').strip()
+            phone = (body.get('phone') or '').strip()
+            if not name or not phone:
+                return _resp(400, {'error': 'Укажите Ф.И.О. и телефон'})
+            ctype = body.get('type', 'first')
+            birth = body.get('birth') or None
+            ref_id = body.get('refId')
+            ref_id = int(ref_id) if (ctype == 'second' and ref_id) else None
+
+            vouchers = VOUCHERS_PER_BATCH if ctype == 'first' else 0
+            cur.execute(
+                """INSERT INTO customers (seller_id, name, phone, birth, type, ref_id, vouchers)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+                (seller_id, name, phone, birth, ctype, ref_id, vouchers),
+            )
+            new_row = cur.fetchone()
+
+            notify = None
+            if ref_id:
+                cur.execute(
+                    "SELECT name, temp_points, life_points FROM customers WHERE id = %s AND seller_id = %s",
+                    (ref_id, seller_id),
+                )
+                ref = cur.fetchone()
+                if ref:
+                    new_life = min(float(ref['life_points']) + LIFETIME_RATE, LIFETIME_CAP)
+                    cur.execute(
+                        "UPDATE customers SET temp_points = temp_points + 1, life_points = %s WHERE id = %s",
+                        (round(new_life, 1), ref_id),
+                    )
+                    notify = ref['name'].split(' ')[0]
+
+            return _resp(200, {'customer': _customer_dict(new_row), 'notify': notify})
+
+        if method == 'POST' and action == 'spend_voucher':
+            cid = int(body.get('id'))
+            cur.execute(
+                "UPDATE customers SET vouchers = vouchers - 1 WHERE id = %s AND seller_id = %s AND vouchers > 0 RETURNING *",
+                (cid, seller_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(400, {'error': 'Нет доступных фиолок'})
+            return _resp(200, {'customer': _customer_dict(row)})
+
+        return _resp(404, {'error': 'Неизвестное действие'})
+
+    finally:
+        cur.close()
+        conn.close()
