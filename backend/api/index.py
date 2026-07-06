@@ -117,21 +117,29 @@ def handler(event: dict, context) -> dict:
             phone = (body.get('phone') or '').strip()
             if not name or not phone:
                 return _resp(400, {'error': 'Укажите Ф.И.О. и телефон'})
-            ctype = body.get('type', 'first')
             birth = body.get('birth') or None
             ref_id = body.get('refId')
-            ref_id = int(ref_id) if (ctype == 'second' and ref_id) else None
+            ref_id = int(ref_id) if ref_id else None
             product_name = (body.get('productName') or '').strip() or None
             purchase_amount = body.get('purchaseAmount')
             purchase_amount = float(purchase_amount) if purchase_amount not in (None, '') else None
             purchase_date = body.get('purchaseDate') or None
 
-            vouchers = VOUCHERS_PER_BATCH if ctype == 'first' else 0
+            if ref_id:
+                cur.execute(
+                    "SELECT id FROM customers WHERE id = %s AND seller_id = %s",
+                    (ref_id, seller_id),
+                )
+                if not cur.fetchone():
+                    return _resp(400, {'error': 'Пригласивший покупатель не найден'})
+
+            # Фиолки выдаются любому зарегистрированному покупателю, совершившему покупку
+            vouchers = VOUCHERS_PER_BATCH
             cur.execute(
                 """INSERT INTO customers
                    (seller_id, name, phone, birth, type, ref_id, vouchers, product_name, purchase_amount, purchase_date)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE)) RETURNING *""",
-                (seller_id, name, phone, birth, ctype, ref_id, vouchers, product_name, purchase_amount, purchase_date),
+                   VALUES (%s, %s, %s, %s, 'customer', %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE)) RETURNING *""",
+                (seller_id, name, phone, birth, ref_id, vouchers, product_name, purchase_amount, purchase_date),
             )
             new_row = cur.fetchone()
 

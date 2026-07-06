@@ -22,7 +22,7 @@ type Customer = {
   name: string;
   phone: string;
   birth: string;
-  type: 'first' | 'second';
+  type: string;
   refId: number | null;
   tempPoints: number;
   lifePoints: number;
@@ -44,12 +44,12 @@ const nav = [
 type NavKey = (typeof nav)[number]['key'];
 type Stats = { totalTemp: number; totalLife: number; totalVouchers: number };
 type Form = {
-  name: string; phone: string; birth: string; type: 'first' | 'second'; refId: string;
+  name: string; phone: string; birth: string; refId: string;
   productName: string; purchaseAmount: string; purchaseDate: string;
 };
 
 const EMPTY_FORM: Form = {
-  name: '', phone: '', birth: '', type: 'first', refId: '',
+  name: '', phone: '', birth: '', refId: '',
   productName: '', purchaseAmount: '', purchaseDate: '',
 };
 
@@ -67,8 +67,6 @@ export default function Index() {
   const [form, setForm] = useState<Form>(EMPTY_FORM);
 
   const authed = sellerId !== null;
-  const firsts = customers.filter((c) => c.type === 'first');
-  const seconds = customers.filter((c) => c.type === 'second');
 
   const stats = useMemo(() => {
     const totalTemp = customers.reduce((s, c) => s + c.tempPoints, 0);
@@ -147,10 +145,9 @@ export default function Index() {
       }
       if (data.notify) {
         const pts = data.earnedPoints ?? 1;
-        toast.success(`Первому покупателю «${data.notify}» начислено ${pts} ${pts === 1 ? 'балл' : 'баллов'}. Отправлен PUSH.`, { icon: '🔔' });
-      } else {
-        toast.success('Покупатель добавлен, выдано 5 фиолок');
+        toast.success(`Пригласившему «${data.notify}» начислено ${pts} ${pts === 1 ? 'балл' : 'баллов'}. Отправлен PUSH.`, { icon: '🔔' });
       }
+      toast.success('Покупатель добавлен, выдано 5 фиолок');
       await loadCustomers(sellerId as number);
       setAddOpen(false);
       setForm(EMPTY_FORM);
@@ -189,15 +186,15 @@ export default function Index() {
         <Sidebar tab={tab} setTab={setTab} />
         <main className="flex-1 p-5 md:p-8 max-w-[1400px] w-full mx-auto animate-fade-in pb-24 md:pb-8" key={tab}>
           {tab === 'customers' && (
-            <Customers {...{ customers, firsts, seconds, stats, setAddOpen }} />
+            <Customers {...{ customers, stats, setAddOpen }} />
           )}
           {tab === 'points' && <Points customers={customers} stats={stats} />}
-          {tab === 'vouchers' && <Vouchers firsts={firsts} spendVoucher={spendVoucher} />}
+          {tab === 'vouchers' && <Vouchers customers={customers} spendVoucher={spendVoucher} />}
           {tab === 'profile' && <Profile email={email} logout={logout} stats={stats} count={customers.length} />}
         </main>
       </div>
       <MobileNav tab={tab} setTab={setTab} />
-      <AddDialog {...{ addOpen, setAddOpen, form, setForm, addCustomer, firsts, busy }} />
+      <AddDialog {...{ addOpen, setAddOpen, form, setForm, addCustomer, customers, busy }} />
     </div>
   );
 }
@@ -303,17 +300,18 @@ function Stat({ icon, label, value, accent }: { icon: string; label: string; val
   );
 }
 
-function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
-  customers: Customer[]; firsts: Customer[]; seconds: Customer[]; stats: Stats; setAddOpen: (v: boolean) => void;
+function Customers({ customers, stats, setAddOpen }: {
+  customers: Customer[]; stats: Stats; setAddOpen: (v: boolean) => void;
 }) {
   const refName = (id: number | null) =>
     id ? customers.find((c: Customer) => c.id === id)?.name.split(' ').slice(0, 2).join(' ') : '—';
+  const invitersCount = customers.filter((c) => c.refId === null).length;
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold font-display">Покупатели</h1>
-          <p className="text-sm text-muted-foreground">Первые и вторые покупатели, реферальные связи</p>
+          <p className="text-sm text-muted-foreground">Единая цепочка приглашений любой длины</p>
         </div>
         <Button onClick={() => setAddOpen(true)}>
           <Icon name="UserPlus" size={16} className="mr-2" /> Добавить покупателя
@@ -322,8 +320,8 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat icon="Users" label="Всего покупателей" value={customers.length} />
-        <Stat icon="Crown" label="Первые покупатели" value={firsts.length} />
-        <Stat icon="Network" label="Вторые покупатели" value={seconds.length} />
+        <Stat icon="Crown" label="Без пригласившего" value={invitersCount} />
+        <Stat icon="Network" label="По приглашению" value={customers.length - invitersCount} />
         <Stat icon="Coins" label="Временных баллов" value={stats.totalTemp.toFixed(1)} accent />
       </div>
 
@@ -334,7 +332,6 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
               <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Ф.И.О.</th>
                 <th className="px-4 py-3 font-medium">Телефон</th>
-                <th className="px-4 py-3 font-medium">Тип</th>
                 <th className="px-4 py-3 font-medium">Пригласил</th>
                 <th className="px-4 py-3 font-medium">Товар</th>
                 <th className="px-4 py-3 font-medium text-right">Объём, ₽</th>
@@ -349,11 +346,6 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
                 <tr key={c.id} className="border-t border-border hover:bg-secondary/40 transition-colors">
                   <td className="px-4 py-3 font-medium">{c.name}<div className="text-xs text-muted-foreground font-normal">с {c.joined}</div></td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.type === 'first' ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
-                      {c.type === 'first' ? 'Первый' : 'Второй'}
-                    </span>
-                  </td>
                   <td className="px-4 py-3 text-muted-foreground">{refName(c.refId)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.productName || '—'}</td>
                   <td className="px-4 py-3 text-right tabular">{c.purchaseAmount ? c.purchaseAmount.toLocaleString('ru') : '—'}</td>
@@ -372,12 +364,11 @@ function Customers({ customers, firsts, seconds, stats, setAddOpen }: {
 }
 
 function Points({ customers, stats }: { customers: Customer[]; stats: Stats }) {
-  const firsts = customers.filter((c) => c.type === 'first');
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold font-display">Баллы лояльности</h1>
-        <p className="text-sm text-muted-foreground">1 балл = {RUB} ₽ · начисление 1 балл за каждую 1000 ₽ покупки · пожизненные лимит {LIFETIME_CAP}</p>
+        <p className="text-sm text-muted-foreground">1 балл = {RUB} ₽ · начисление 1 балл за каждую 1000 ₽ покупки приглашённого · пожизненные лимит {LIFETIME_CAP}</p>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
@@ -388,10 +379,10 @@ function Points({ customers, stats }: { customers: Customer[]; stats: Stats }) {
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-border bg-secondary/70 text-xs uppercase tracking-wide text-muted-foreground font-medium">
-          Начисления по первым покупателям
+          Начисления по покупателям
         </div>
         <div className="divide-y divide-border">
-          {firsts.map((c) => {
+          {customers.map((c) => {
             const pct = Math.min((c.lifePoints / LIFETIME_CAP) * 100, 100);
             return (
               <div key={c.id} className="px-4 py-4">
@@ -415,22 +406,21 @@ function Points({ customers, stats }: { customers: Customer[]; stats: Stats }) {
   );
 }
 
-function Vouchers({ firsts, spendVoucher }: { firsts: Customer[]; spendVoucher: (id: number) => void }) {
+function Vouchers({ customers, spendVoucher }: { customers: Customer[]; spendVoucher: (id: number) => void }) {
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold font-display">Фиолки</h1>
-        <p className="text-sm text-muted-foreground">Выдано первым покупателям · до {VOUCHERS_PER_BATCH} шт. за раз</p>
+        <p className="text-sm text-muted-foreground">Выдаются каждому зарегистрированному покупателю · до {VOUCHERS_PER_BATCH} шт. за раз</p>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {firsts.map((c) => (
+        {customers.map((c) => (
           <div key={c.id} className="bg-card border border-border rounded-lg p-4">
             <div className="flex items-start justify-between mb-3">
               <div>
                 <div className="font-medium leading-tight">{c.name.split(' ').slice(0, 2).join(' ')}</div>
                 <div className="text-xs text-muted-foreground tabular">{c.phone}</div>
               </div>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Первый</span>
             </div>
             <div className="flex gap-1.5 mb-4">
               {Array.from({ length: VOUCHERS_PER_BATCH }).map((_, i) => (
@@ -489,9 +479,9 @@ function Profile({ email, logout, stats, count }: {
   );
 }
 
-function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, firsts, busy }: {
+function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, customers, busy }: {
   addOpen: boolean; setAddOpen: (v: boolean) => void;
-  form: Form; setForm: (v: Form) => void; addCustomer: () => void; firsts: Customer[]; busy: boolean;
+  form: Form; setForm: (v: Form) => void; addCustomer: () => void; customers: Customer[]; busy: boolean;
 }) {
   return (
     <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -500,14 +490,6 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, firsts, bu
           <DialogTitle className="font-display">Новый покупатель</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="flex gap-2">
-            {(['first', 'second'] as const).map((t) => (
-              <button key={t} onClick={() => setForm({ ...form, type: t })}
-                className={`flex-1 py-2 rounded border text-sm font-medium transition ${form.type === t ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted-foreground'}`}>
-                {t === 'first' ? 'Первый покупатель' : 'Второй покупатель'}
-              </button>
-            ))}
-          </div>
           <div className="space-y-1.5">
             <Label>Ф.И.О.</Label>
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Иванов Иван Иванович" />
@@ -522,18 +504,16 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, firsts, bu
               <Input type="date" value={form.birth} onChange={(e) => setForm({ ...form, birth: e.target.value })} />
             </div>
           </div>
-          {form.type === 'second' && (
-            <div className="space-y-1.5">
-              <Label>По фиолке от (первый покупатель)</Label>
-              <select value={form.refId} onChange={(e) => setForm({ ...form, refId: e.target.value })}
-                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm">
-                <option value="">— выберите —</option>
-                {firsts.map((c: Customer) => (
-                  <option key={c.id} value={c.id}>{c.name} · фиолок: {c.vouchers}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="space-y-1.5">
+            <Label>Кто пригласил (необязательно)</Label>
+            <select value={form.refId} onChange={(e) => setForm({ ...form, refId: e.target.value })}
+              className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm">
+              <option value="">— без приглашения —</option>
+              {customers.map((c: Customer) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="space-y-1.5">
             <Label>Наименование товара</Label>
             <Input value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} placeholder="Например, кроссовки Air Max" />
