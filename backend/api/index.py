@@ -162,6 +162,24 @@ def handler(event: dict, context) -> dict:
                 if not cur.fetchone():
                     return _resp(400, {'error': 'Пригласивший покупатель не найден'})
 
+                # Защита от закольцованных приглашений: поднимаемся по цепочке
+                # "пригласил" вверх и проверяем, что она не зациклена
+                cur.execute(
+                    """WITH RECURSIVE chain AS (
+                           SELECT id, ref_id, 1 AS depth FROM customers
+                           WHERE id = %s AND seller_id = %s
+                           UNION ALL
+                           SELECT c.id, c.ref_id, chain.depth + 1
+                           FROM customers c JOIN chain ON c.id = chain.ref_id
+                           WHERE chain.depth < 1000
+                       )
+                       SELECT count(*) AS cnt, count(DISTINCT id) AS distinct_cnt FROM chain""",
+                    (ref_id, seller_id),
+                )
+                chain_check = cur.fetchone()
+                if chain_check['cnt'] != chain_check['distinct_cnt']:
+                    return _resp(400, {'error': 'Обнаружена закольцованная цепочка приглашений'})
+
             # Фиолки выдаются любому зарегистрированному покупателю, совершившему покупку
             vouchers = VOUCHERS_PER_BATCH
             cur.execute(
