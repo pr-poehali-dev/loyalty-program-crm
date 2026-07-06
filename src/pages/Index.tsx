@@ -32,6 +32,8 @@ type Customer = {
   productName: string;
   purchaseAmount: number;
   purchaseDate: string;
+  totalEarnedPoints: number;
+  invitedCount: number;
 };
 
 const nav = [
@@ -65,6 +67,9 @@ export default function Index() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState<Form>(EMPTY_FORM);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<{ customer: Customer; invited: Customer[] } | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const authed = sellerId !== null;
 
@@ -88,6 +93,24 @@ export default function Index() {
   useEffect(() => {
     if (sellerId !== null) loadCustomers(sellerId);
   }, [sellerId]);
+
+  const openDetail = async (id: number) => {
+    setDetailId(id);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`${API_URL}?action=customer_detail&id=${id}`, {
+        headers: { 'X-Seller-Id': String(sellerId) },
+      });
+      const data = await res.json();
+      if (res.ok) setDetail(data);
+      else toast.error(data.error || 'Не удалось загрузить данные покупателя');
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   const login = async () => {
     if (!email.includes('@') || pass.length < 3) {
@@ -186,7 +209,7 @@ export default function Index() {
         <Sidebar tab={tab} setTab={setTab} />
         <main className="flex-1 p-5 md:p-8 max-w-[1400px] w-full mx-auto animate-fade-in pb-24 md:pb-8" key={tab}>
           {tab === 'customers' && (
-            <Customers {...{ customers, stats, setAddOpen }} />
+            <Customers {...{ customers, stats, setAddOpen, openDetail }} />
           )}
           {tab === 'points' && <Points customers={customers} stats={stats} />}
           {tab === 'vouchers' && <Vouchers customers={customers} spendVoucher={spendVoucher} />}
@@ -195,6 +218,12 @@ export default function Index() {
       </div>
       <MobileNav tab={tab} setTab={setTab} />
       <AddDialog {...{ addOpen, setAddOpen, form, setForm, addCustomer, customers, busy }} />
+      <CustomerDetailDialog
+        open={detailId !== null}
+        onOpenChange={(v) => !v && setDetailId(null)}
+        loading={detailLoading}
+        detail={detail}
+      />
     </div>
   );
 }
@@ -300,8 +329,8 @@ function Stat({ icon, label, value, accent }: { icon: string; label: string; val
   );
 }
 
-function Customers({ customers, stats, setAddOpen }: {
-  customers: Customer[]; stats: Stats; setAddOpen: (v: boolean) => void;
+function Customers({ customers, stats, setAddOpen, openDetail }: {
+  customers: Customer[]; stats: Stats; setAddOpen: (v: boolean) => void; openDetail: (id: number) => void;
 }) {
   const refName = (id: number | null) =>
     id ? customers.find((c: Customer) => c.id === id)?.name.split(' ').slice(0, 2).join(' ') : '—';
@@ -311,7 +340,7 @@ function Customers({ customers, stats, setAddOpen }: {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold font-display">Покупатели</h1>
-          <p className="text-sm text-muted-foreground">Единая цепочка приглашений любой длины</p>
+          <p className="text-sm text-muted-foreground">Единая цепочка приглашений любой длины · нажмите на строку для подробностей</p>
         </div>
         <Button onClick={() => setAddOpen(true)}>
           <Icon name="UserPlus" size={16} className="mr-2" /> Добавить покупателя
@@ -343,7 +372,7 @@ function Customers({ customers, stats, setAddOpen }: {
             </thead>
             <tbody>
               {customers.map((c: Customer) => (
-                <tr key={c.id} className="border-t border-border hover:bg-secondary/40 transition-colors">
+                <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">{c.name}<div className="text-xs text-muted-foreground font-normal">с {c.joined}</div></td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
                   <td className="px-4 py-3 text-muted-foreground">{refName(c.refId)}</td>
@@ -535,6 +564,64 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, customers,
             {busy ? 'Сохранение…' : 'Сохранить'}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CustomerDetailDialog({ open, onOpenChange, loading, detail }: {
+  open: boolean; onOpenChange: (v: boolean) => void; loading: boolean;
+  detail: { customer: Customer; invited: Customer[] } | null;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-display">Карточка покупателя</DialogTitle>
+        </DialogHeader>
+        {loading && (
+          <div className="py-10 flex items-center justify-center text-muted-foreground">
+            <Icon name="Loader2" size={20} className="animate-spin mr-2" /> Загрузка…
+          </div>
+        )}
+        {!loading && detail && (
+          <div className="space-y-5">
+            <div>
+              <div className="font-semibold text-lg">{detail.customer.name}</div>
+              <div className="text-sm text-muted-foreground tabular">{detail.customer.phone}</div>
+              <div className="text-xs text-muted-foreground mt-1">Покупатель с {detail.customer.joined}</div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Stat icon="UserPlus" label="Приглашено покупателей" value={detail.customer.invitedCount} accent />
+              <Stat icon="Trophy" label="Заработано баллов всего" value={detail.customer.totalEarnedPoints.toFixed(1)} accent />
+              <Stat icon="Coins" label="Временные баллы" value={detail.customer.tempPoints.toFixed(1)} />
+              <Stat icon="Infinity" label="Пожизненные баллы" value={detail.customer.lifePoints.toFixed(1)} />
+            </div>
+
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-border bg-secondary/70 text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                Кого пригласил ({detail.invited.length})
+              </div>
+              {detail.invited.length === 0 && (
+                <div className="px-4 py-4 text-sm text-muted-foreground">Пока никого не пригласил</div>
+              )}
+              <div className="divide-y divide-border max-h-56 overflow-y-auto">
+                {detail.invited.map((c) => (
+                  <div key={c.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
+                    <div>
+                      <div className="font-medium">{c.name}</div>
+                      <div className="text-xs text-muted-foreground tabular">{c.phone}</div>
+                    </div>
+                    <div className="text-xs text-muted-foreground tabular">
+                      {c.purchaseAmount ? `${c.purchaseAmount.toLocaleString('ru')} ₽` : '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

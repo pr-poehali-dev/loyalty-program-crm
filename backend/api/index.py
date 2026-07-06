@@ -52,6 +52,8 @@ def _customer_dict(row) -> dict:
         'productName': row['product_name'] or '',
         'purchaseAmount': float(row['purchase_amount']) if row['purchase_amount'] is not None else 0,
         'purchaseDate': str(row['purchase_date']) if row['purchase_date'] else '',
+        'totalEarnedPoints': float(row['total_earned_points']) if 'total_earned_points' in row.keys() else 0,
+        'invitedCount': row['invited_count'] if 'invited_count' in row.keys() else 0,
     }
 
 
@@ -104,9 +106,36 @@ def handler(event: dict, context) -> dict:
             return _resp(401, {'error': 'Требуется авторизация'})
         seller_id = int(seller_id)
 
+        if method == 'GET' and action == 'customer_detail':
+            cid = params.get('id')
+            if not cid:
+                return _resp(400, {'error': 'Не указан id покупателя'})
+            cur.execute(
+                """SELECT c.*,
+                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                   FROM customers c WHERE c.id = %s AND c.seller_id = %s""",
+                (int(cid), seller_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {'error': 'Покупатель не найден'})
+            cur.execute(
+                """SELECT c.*,
+                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                   FROM customers c WHERE c.ref_id = %s AND c.seller_id = %s ORDER BY c.id""",
+                (int(cid), seller_id),
+            )
+            invited_rows = cur.fetchall()
+            return _resp(200, {
+                'customer': _customer_dict(row),
+                'invited': [_customer_dict(r) for r in invited_rows],
+            })
+
         if method == 'GET':
             cur.execute(
-                "SELECT * FROM customers WHERE seller_id = %s ORDER BY id",
+                """SELECT c.*,
+                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                   FROM customers c WHERE c.seller_id = %s ORDER BY c.id""",
                 (seller_id,),
             )
             rows = cur.fetchall()
@@ -147,7 +176,7 @@ def handler(event: dict, context) -> dict:
             earned_points = None
             if ref_id:
                 cur.execute(
-                    "SELECT name, temp_points, life_points FROM customers WHERE id = %s AND seller_id = %s",
+                    "SELECT name, temp_points, life_points, total_earned_points FROM customers WHERE id = %s AND seller_id = %s",
                     (ref_id, seller_id),
                 )
                 ref = cur.fetchone()
@@ -156,9 +185,10 @@ def handler(event: dict, context) -> dict:
                     earned_points = round(max(amount / POINTS_PER_AMOUNT, 1) if amount > 0 else 1, 1)
                     new_temp = round(float(ref['temp_points']) + earned_points, 1)
                     new_life = min(round(float(ref['life_points']) + earned_points * LIFETIME_SHARE, 1), LIFETIME_CAP)
+                    new_total = round(float(ref['total_earned_points']) + earned_points, 1)
                     cur.execute(
-                        "UPDATE customers SET temp_points = %s, life_points = %s WHERE id = %s",
-                        (new_temp, new_life, ref_id),
+                        "UPDATE customers SET temp_points = %s, life_points = %s, total_earned_points = %s WHERE id = %s",
+                        (new_temp, new_life, new_total, ref_id),
                     )
                     notify = ref['name'].split(' ')[0]
 

@@ -1,0 +1,2 @@
+ALTER TABLE customers
+    ADD COLUMN IF NOT EXISTS total_earned_points NUMERIC(10,1) NOT NULL DEFAULT 0;
