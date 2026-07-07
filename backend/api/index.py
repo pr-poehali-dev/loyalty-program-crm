@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import hashlib
 import psycopg2
 import psycopg2.extras
@@ -37,6 +38,7 @@ def _resp(status: int, body: dict):
 
 
 def _customer_dict(row) -> dict:
+    keys = row.keys()
     return {
         'id': row['id'],
         'name': row['name'],
@@ -52,13 +54,29 @@ def _customer_dict(row) -> dict:
         'productName': row['product_name'] or '',
         'purchaseAmount': float(row['purchase_amount']) if row['purchase_amount'] is not None else 0,
         'purchaseDate': str(row['purchase_date']) if row['purchase_date'] else '',
-        'totalEarnedPoints': float(row['total_earned_points']) if 'total_earned_points' in row.keys() else 0,
-        'invitedCount': row['invited_count'] if 'invited_count' in row.keys() else 0,
+        'totalEarnedPoints': float(row['total_earned_points']) if 'total_earned_points' in keys else 0,
+        'invitedCount': row['invited_count'] if 'invited_count' in keys else 0,
+        'sellerName': row['seller_name'] if 'seller_name' in keys else None,
+        'sellerEmail': row['seller_email'] if 'seller_email' in keys else None,
+    }
+
+
+def _seller_dict(row) -> dict:
+    keys = row.keys()
+    return {
+        'id': row['id'],
+        'email': row['email'],
+        'name': row['name'],
+        'role': row['role'],
+        'status': row['status'],
+        'invitedAt': str(row['invited_at']) if row.get('invited_at') else None,
+        'activatedAt': str(row['activated_at']) if row.get('activated_at') else None,
+        'customersCount': row['customers_count'] if 'customers_count' in keys else 0,
     }
 
 
 def handler(event: dict, context) -> dict:
-    '''Бэкенд CRM программы лояльности: вход продавца, покупатели, баллы, фиолки.'''
+    '''Бэкенд CRM программы лояльности: вход, роли (админ/продавец), приглашения, покупатели, баллы, фиолки.'''
     method = event.get('httpMethod', 'GET')
     if method == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'isBase64Encoded': False, 'body': ''}
@@ -66,7 +84,7 @@ def handler(event: dict, context) -> dict:
     params = event.get('queryStringParameters') or {}
     action = params.get('action', '')
     headers = event.get('headers', {})
-    seller_id = headers.get('X-Seller-Id') or headers.get('x-seller-id')
+    seller_id_header = headers.get('X-Seller-Id') or headers.get('x-seller-id')
 
     conn = _conn()
     conn.autocommit = True
@@ -78,33 +96,59 @@ def handler(event: dict, context) -> dict:
         if method == 'POST' and action == 'login':
             email = (body.get('email') or '').strip().lower()
             password = body.get('password') or ''
-            cur.execute("SELECT id, email, name, password_hash FROM sellers WHERE email = %s", (email,))
+            cur.execute("SELECT id, email, name, password_hash, role, status FROM sellers WHERE email = %s", (email,))
             seller = cur.fetchone()
             if not seller:
                 return _resp(401, {'error': 'Продавец не найден'})
+            if seller['status'] == 'invited':
+                return _resp(403, {'error': 'Учётная запись не активирована. Перейдите по ссылке-приглашению из письма'})
+            if seller['status'] == 'blocked':
+                return _resp(403, {'error': 'Учётная запись заблокирована'})
             ok = seller['password_hash'] == password or seller['password_hash'] == _hash(password)
             if not ok:
                 return _resp(401, {'error': 'Неверный пароль'})
-            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name']})
+            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name'], 'role': seller['role']})
 
-        if method == 'POST' and action == 'register':
-            email = (body.get('email') or '').strip().lower()
+        if method == 'GET' and action == 'invite_info':
+            token = params.get('token') or ''
+            cur.execute("SELECT email, name, status FROM sellers WHERE invite_token = %s", (token,))
+            inv = cur.fetchone()
+            if not inv:
+                return _resp(404, {'error': 'Приглашение не найдено'})
+            if inv['status'] != 'invited':
+                return _resp(400, {'error': 'Приглашение уже использовано'})
+            return _resp(200, {'email': inv['email'], 'name': inv['name']})
+
+        if method == 'POST' and action == 'accept_invite':
+            token = body.get('token') or ''
             password = body.get('password') or ''
-            if '@' not in email or len(password) < 3:
-                return _resp(400, {'error': 'Некорректный email или короткий пароль'})
-            cur.execute("SELECT id FROM sellers WHERE email = %s", (email,))
-            if cur.fetchone():
-                return _resp(409, {'error': 'Продавец с таким email уже существует'})
+            if len(password) < 3:
+                return _resp(400, {'error': 'Пароль слишком короткий'})
+            cur.execute("SELECT id, status FROM sellers WHERE invite_token = %s", (token,))
+            inv = cur.fetchone()
+            if not inv:
+                return _resp(404, {'error': 'Приглашение не найдено'})
+            if inv['status'] != 'invited':
+                return _resp(400, {'error': 'Приглашение уже использовано'})
             cur.execute(
-                "INSERT INTO sellers (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id, email, name",
-                (email, _hash(password), body.get('name') or 'Продавец'),
+                """UPDATE sellers SET password_hash = %s, status = 'active', invite_token = NULL, activated_at = now()
+                   WHERE id = %s RETURNING id, email, name, role""",
+                (_hash(password), inv['id']),
             )
             seller = cur.fetchone()
-            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name']})
+            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name'], 'role': seller['role']})
 
-        if not seller_id:
+        if not seller_id_header:
             return _resp(401, {'error': 'Требуется авторизация'})
-        seller_id = int(seller_id)
+        seller_id = int(seller_id_header)
+
+        cur.execute("SELECT id, role, status FROM sellers WHERE id = %s", (seller_id,))
+        current = cur.fetchone()
+        if not current:
+            return _resp(401, {'error': 'Требуется авторизация'})
+        if current['status'] == 'blocked':
+            return _resp(403, {'error': 'Учётная запись заблокирована'})
+        is_admin = current['role'] == 'admin'
 
         if method == 'POST' and action == 'change_password':
             old_password = body.get('oldPassword') or ''
@@ -113,35 +157,96 @@ def handler(event: dict, context) -> dict:
                 return _resp(400, {'error': 'Новый пароль слишком короткий'})
             cur.execute("SELECT password_hash FROM sellers WHERE id = %s", (seller_id,))
             seller = cur.fetchone()
-            if not seller:
-                return _resp(404, {'error': 'Продавец не найден'})
             ok = seller['password_hash'] == old_password or seller['password_hash'] == _hash(old_password)
             if not ok:
                 return _resp(401, {'error': 'Текущий пароль указан неверно'})
-            cur.execute(
-                "UPDATE sellers SET password_hash = %s WHERE id = %s",
-                (_hash(new_password), seller_id),
-            )
+            cur.execute("UPDATE sellers SET password_hash = %s WHERE id = %s", (_hash(new_password), seller_id))
             return _resp(200, {'ok': True})
 
+        # ---- Админские действия ----
+        if action == 'invite_seller':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            email = (body.get('email') or '').strip().lower()
+            name = (body.get('name') or '').strip() or 'Продавец'
+            if '@' not in email:
+                return _resp(400, {'error': 'Некорректный email'})
+            cur.execute("SELECT id FROM sellers WHERE email = %s", (email,))
+            if cur.fetchone():
+                return _resp(409, {'error': 'Продавец с таким email уже существует'})
+            token = secrets.token_urlsafe(24)
+            placeholder_hash = _hash(secrets.token_hex(16))
+            cur.execute(
+                """INSERT INTO sellers (email, password_hash, name, role, status, invite_token, invited_at)
+                   VALUES (%s, %s, %s, 'seller', 'invited', %s, now()) RETURNING id""",
+                (email, placeholder_hash, name, token),
+            )
+            new_id = cur.fetchone()['id']
+            return _resp(200, {'id': new_id, 'email': email, 'name': name, 'inviteToken': token})
+
+        if method == 'GET' and action == 'list_sellers':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            cur.execute(
+                """SELECT s.*, (SELECT COUNT(*) FROM customers c WHERE c.seller_id = s.id) AS customers_count
+                   FROM sellers s ORDER BY s.id"""
+            )
+            rows = cur.fetchall()
+            return _resp(200, {'sellers': [_seller_dict(r) for r in rows]})
+
+        if method == 'POST' and action == 'set_seller_status':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            target_id = int(body.get('id'))
+            new_status = body.get('status')
+            if new_status not in ('active', 'blocked'):
+                return _resp(400, {'error': 'Некорректный статус'})
+            if target_id == seller_id:
+                return _resp(400, {'error': 'Нельзя изменить статус самому себе'})
+            cur.execute(
+                "UPDATE sellers SET status = %s WHERE id = %s AND role = 'seller' RETURNING id",
+                (new_status, target_id),
+            )
+            if not cur.fetchone():
+                return _resp(404, {'error': 'Продавец не найден'})
+            return _resp(200, {'ok': True})
+
+        if method == 'GET' and action == 'all_customers':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            cur.execute(
+                """SELECT c.*, s.name AS seller_name, s.email AS seller_email,
+                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                   FROM customers c JOIN sellers s ON s.id = c.seller_id
+                   ORDER BY c.id"""
+            )
+            rows = cur.fetchall()
+            return _resp(200, {'customers': [_customer_dict(r) for r in rows]})
+
+        # ---- Общие действия продавца ----
         if method == 'GET' and action == 'customer_detail':
             cid = params.get('id')
             if not cid:
                 return _resp(400, {'error': 'Не указан id покупателя'})
-            cur.execute(
-                """SELECT c.*,
-                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
-                   FROM customers c WHERE c.id = %s AND c.seller_id = %s""",
-                (int(cid), seller_id),
-            )
+            if is_admin:
+                cur.execute(
+                    """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                       FROM customers c WHERE c.id = %s""",
+                    (int(cid),),
+                )
+            else:
+                cur.execute(
+                    """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                       FROM customers c WHERE c.id = %s AND c.seller_id = %s""",
+                    (int(cid), seller_id),
+                )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {'error': 'Покупатель не найден'})
             cur.execute(
-                """SELECT c.*,
-                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
-                   FROM customers c WHERE c.ref_id = %s AND c.seller_id = %s ORDER BY c.id""",
-                (int(cid), seller_id),
+                """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                   FROM customers c WHERE c.ref_id = %s ORDER BY c.id""",
+                (int(cid),),
             )
             invited_rows = cur.fetchall()
             return _resp(200, {
@@ -151,8 +256,7 @@ def handler(event: dict, context) -> dict:
 
         if method == 'GET':
             cur.execute(
-                """SELECT c.*,
-                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
                    FROM customers c WHERE c.seller_id = %s ORDER BY c.id""",
                 (seller_id,),
             )
