@@ -1,0 +1,1 @@
+UPDATE sellers SET password_hash = 'f2cfd04e2dc804047b59986c8ca0b1c51665760136a83fc61e6d124ad3af08a7' WHERE email = 'seller@company.ru';
