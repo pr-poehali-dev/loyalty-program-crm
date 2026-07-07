@@ -59,6 +59,7 @@ type Seller = {
   invitedAt: string | null;
   activatedAt: string | null;
   customersCount: number;
+  workingDays: number;
 };
 
 const sellerNav = [
@@ -752,6 +753,10 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus }: {
     active: 'bg-accent/10 text-accent',
     blocked: 'bg-destructive/10 text-destructive',
   } as const;
+  const sellersOnly = sellers.filter((s) => s.role !== 'admin');
+  const totalCustomers = sellersOnly.reduce((s, x) => s + x.customersCount, 0);
+  const totalDays = sellersOnly.reduce((s, x) => s + x.workingDays, 0);
+  const avgPerShift = totalDays > 0 ? totalCustomers / totalDays : 0;
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -764,6 +769,12 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus }: {
         </Button>
       </div>
 
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <Stat icon="Users" label="Продавцов" value={sellersOnly.length} />
+        <Stat icon="UserPlus" label="Всего покупателей" value={totalCustomers} />
+        <Stat icon="TrendingUp" label="В среднем за смену" value={avgPerShift.toFixed(1)} accent />
+      </div>
+
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -773,6 +784,8 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus }: {
                 <th className="px-4 py-3 font-medium">Email (логин)</th>
                 <th className="px-4 py-3 font-medium">Статус</th>
                 <th className="px-4 py-3 font-medium text-right">Покупателей</th>
+                <th className="px-4 py-3 font-medium text-right">Смен отработано</th>
+                <th className="px-4 py-3 font-medium text-right">Ср. покупателей/смену</th>
                 <th className="px-4 py-3 font-medium text-right">Действия</th>
               </tr>
             </thead>
@@ -790,6 +803,10 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus }: {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right tabular">{s.customersCount}</td>
+                  <td className="px-4 py-3 text-right tabular">{s.workingDays}</td>
+                  <td className="px-4 py-3 text-right tabular font-semibold">
+                    {s.workingDays > 0 ? (s.customersCount / s.workingDays).toFixed(1) : '—'}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     {s.role !== 'admin' && s.status !== 'invited' && (
                       s.status === 'active' ? (

@@ -144,6 +144,7 @@ def _seller_dict(row) -> dict:
         'invitedAt': str(row['invited_at']) if row.get('invited_at') else None,
         'activatedAt': str(row['activated_at']) if row.get('activated_at') else None,
         'customersCount': row['customers_count'] if 'customers_count' in keys else 0,
+        'workingDays': row['working_days'] if 'working_days' in keys else 0,
     }
 
 
@@ -260,7 +261,9 @@ def handler(event: dict, context) -> dict:
             if not is_admin:
                 return _resp(403, {'error': 'Доступно только администратору'})
             cur.execute(
-                """SELECT s.*, (SELECT COUNT(*) FROM customers c WHERE c.seller_id = s.id) AS customers_count
+                """SELECT s.*,
+                          (SELECT COUNT(*) FROM customers c WHERE c.seller_id = s.id) AS customers_count,
+                          (SELECT COUNT(DISTINCT c.joined) FROM customers c WHERE c.seller_id = s.id) AS working_days
                    FROM sellers s ORDER BY s.id"""
             )
             rows = cur.fetchall()
