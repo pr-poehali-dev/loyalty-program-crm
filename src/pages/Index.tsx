@@ -112,8 +112,14 @@ export default function Index() {
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [birthdayCustomers, setBirthdayCustomers] = useState<BirthdayCustomer[]>([]);
   const [birthdayBonusAmount, setBirthdayBonusAmount] = useState(200);
-  const [sellerDateFrom, setSellerDateFrom] = useState('');
-  const [sellerDateTo, setSellerDateTo] = useState('');
+  const [sellerDateFrom, setSellerDateFrom] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [sellerDateTo, setSellerDateTo] = useState(() => {
+    const d = new Date();
+    return d.toISOString().slice(0, 10);
+  });
 
   const authed = sellerId !== null;
   const isAdmin = role === 'admin';
@@ -173,7 +179,7 @@ export default function Index() {
 
   useEffect(() => {
     if (sellerId === null) return;
-    loadSellers(sellerId);
+    loadSellers(sellerId, sellerDateFrom, sellerDateTo);
     if (isAdmin) {
       loadAllCustomers(sellerId);
     } else {
@@ -777,6 +783,11 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
   const totalDays = sellersOnly.reduce((s, x) => s + x.workingDays, 0);
   const avgPerShift = totalDays > 0 ? totalCustomers / totalDays : 0;
   const hasFilter = !!dateFrom || !!dateTo;
+
+  const avgOf = (s: Seller) => (s.workingDays > 0 ? s.customersCount / s.workingDays : -1);
+  const rankedSellers = [...sellersOnly].sort((a, b) => avgOf(b) - avgOf(a));
+  const adminRows = sellers.filter((s) => s.role === 'admin');
+  const sortedSellers = [...rankedSellers, ...adminRows];
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -784,6 +795,7 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
           <h1 className="text-xl font-bold font-display">Продавцы</h1>
           <p className="text-sm text-muted-foreground">
             {isAdmin ? 'Приглашение и управление доступом продавцов' : 'Статистика продавцов команды'}
+            {' · '}рейтинг по среднему числу покупателей за смену, за выбранный период
           </p>
         </div>
         {isAdmin && (
@@ -802,11 +814,9 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
           <Label className="text-xs text-muted-foreground">по</Label>
           <Input type="date" value={dateTo} onChange={(e) => onDateToChange(e.target.value)} className="w-40" />
         </div>
-        {hasFilter && (
-          <Button variant="outline" size="sm" onClick={onResetDates}>
-            <Icon name="X" size={14} className="mr-1.5" /> Сбросить период
-          </Button>
-        )}
+        <Button variant="outline" size="sm" onClick={onResetDates}>
+          <Icon name="X" size={14} className="mr-1.5" /> {hasFilter ? 'За всё время' : 'Сбросить период'}
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
@@ -820,6 +830,7 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-3 font-medium text-right">#</th>
                 <th className="px-4 py-3 font-medium">Имя</th>
                 {isAdmin && <th className="px-4 py-3 font-medium">Email (логин)</th>}
                 <th className="px-4 py-3 font-medium">Статус</th>
@@ -830,9 +841,17 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
               </tr>
             </thead>
             <tbody>
-              {sellers.map((s) => (
+              {sortedSellers.map((s, idx) => (
                 <tr key={s.id} className="border-t border-border hover:bg-secondary/40 transition-colors">
-                  <td className="px-4 py-3 font-medium">{s.name}</td>
+                  <td className="px-4 py-3 text-right tabular text-muted-foreground">
+                    {s.role !== 'admin' ? idx + 1 : '—'}
+                  </td>
+                  <td className="px-4 py-3 font-medium">
+                    {idx === 0 && s.role !== 'admin' && s.workingDays > 0 && (
+                      <Icon name="Trophy" size={14} className="inline mr-1.5 text-accent" />
+                    )}
+                    {s.name}
+                  </td>
                   {isAdmin && <td className="px-4 py-3 tabular text-muted-foreground">{s.email}</td>}
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusClass[s.status]}`}>
