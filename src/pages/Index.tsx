@@ -37,6 +37,17 @@ type Customer = {
   sellerName?: string | null;
   sellerEmail?: string | null;
   registrationCompleted: boolean;
+  pointsRedeemed: boolean;
+  pointsRedeemedAmount: number;
+  birthdayBonusNotifyDate?: string | null;
+  birthdayBonusUsedYear?: number | null;
+};
+
+type BirthdayCustomer = Customer & {
+  daysUntilBirthday: number;
+  shouldNotify: boolean;
+  bonusActive: boolean;
+  bonusExpires: string | null;
 };
 
 type Seller = {
@@ -54,12 +65,14 @@ const sellerNav = [
   { key: 'customers', label: 'Покупатели', icon: 'Users' },
   { key: 'points', label: 'Баллы', icon: 'Coins' },
   { key: 'vouchers', label: 'Фиолки', icon: 'Ticket' },
+  { key: 'birthdays', label: 'Дни рождения', icon: 'Cake' },
   { key: 'profile', label: 'Профиль', icon: 'UserCog' },
 ] as const;
 
 const adminNav = [
   { key: 'sellers', label: 'Продавцы', icon: 'Users' },
   { key: 'allCustomers', label: 'Все покупатели', icon: 'Network' },
+  { key: 'birthdays', label: 'Дни рождения', icon: 'Cake' },
   { key: 'profile', label: 'Профиль', icon: 'UserCog' },
 ] as const;
 
@@ -95,6 +108,8 @@ export default function Index() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [birthdayCustomers, setBirthdayCustomers] = useState<BirthdayCustomer[]>([]);
+  const [birthdayBonusAmount, setBirthdayBonusAmount] = useState(200);
 
   const authed = sellerId !== null;
   const isAdmin = role === 'admin';
@@ -136,6 +151,19 @@ export default function Index() {
     }
   };
 
+  const loadBirthdayCustomers = async (sid: number) => {
+    try {
+      const res = await fetch(`${API_URL}?action=birthday_bonuses`, { headers: { 'X-Seller-Id': String(sid) } });
+      const data = await res.json();
+      if (res.ok) {
+        setBirthdayCustomers(data.customers || []);
+        setBirthdayBonusAmount(data.bonusAmount ?? 200);
+      }
+    } catch {
+      toast.error('Не удалось загрузить дни рождения');
+    }
+  };
+
   useEffect(() => {
     if (sellerId === null) return;
     if (isAdmin) {
@@ -144,6 +172,7 @@ export default function Index() {
     } else {
       loadCustomers(sellerId);
     }
+    loadBirthdayCustomers(sellerId);
   }, [sellerId, isAdmin]);
 
   const inviteSeller = async (inviteEmail: string, inviteName: string) => {
@@ -208,6 +237,67 @@ export default function Index() {
     if (isAdmin) await loadAllCustomers(sellerId);
     else await loadCustomers(sellerId);
     if (detailId !== null) await openDetail(detailId);
+    await loadBirthdayCustomers(sellerId);
+  };
+
+  const redeemPoints = async (id: number, amount: number) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}?action=redeem_points`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ id, amount }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось списать баллы');
+        return;
+      }
+      toast.success(`Списано ${amount} баллов за эту покупку`);
+      await refreshAfterMutation();
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendBirthdaySms = async (id: number) => {
+    try {
+      const res = await fetch(`${API_URL}?action=send_birthday_sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось отправить SMS');
+        return;
+      }
+      toast.success('SMS с поздравлением и скидкой отправлено');
+      await loadBirthdayCustomers(sellerId as number);
+    } catch {
+      toast.error('Сервер недоступен');
+    }
+  };
+
+  const useBirthdayBonus = async (id: number) => {
+    try {
+      const res = await fetch(`${API_URL}?action=use_birthday_bonus`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось применить скидку');
+        return;
+      }
+      toast.success('Скидка ко дню рождения применена');
+      await loadBirthdayCustomers(sellerId as number);
+    } catch {
+      toast.error('Сервер недоступен');
+    }
   };
 
   const saveEditedCustomer = async (payload: Partial<Form> & { id: number }) => {
@@ -367,6 +457,14 @@ export default function Index() {
           {isAdmin && activeTab === 'allCustomers' && (
             <AllCustomers customers={allCustomers} openDetail={openDetail} />
           )}
+          {activeTab === 'birthdays' && (
+            <Birthdays
+              customers={birthdayCustomers}
+              bonusAmount={birthdayBonusAmount}
+              sendSms={sendBirthdaySms}
+              useBonus={useBirthdayBonus}
+            />
+          )}
           {activeTab === 'profile' && (
             <Profile email={email} logout={logout} stats={stats} count={isAdmin ? allCustomers.length : customers.length} sellerId={sellerId as number} isAdmin={isAdmin} />
           )}
@@ -382,6 +480,8 @@ export default function Index() {
         isAdmin={isAdmin}
         onEdit={(c) => setEditCustomer(c)}
         onComplete={completeRegistration}
+        onRedeemPoints={redeemPoints}
+        busy={busy}
       />
       <EditCustomerDialog
         customer={editCustomer}
@@ -994,14 +1094,22 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, customers,
   );
 }
 
-function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, onEdit, onComplete }: {
+function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, onEdit, onComplete, onRedeemPoints, busy }: {
   open: boolean; onOpenChange: (v: boolean) => void; loading: boolean;
   detail: { customer: Customer; invited: Customer[] } | null;
   isAdmin: boolean;
   onEdit: (c: Customer) => void;
   onComplete: (id: number) => void;
+  onRedeemPoints: (id: number, amount: number) => void;
+  busy: boolean;
 }) {
   const canEdit = !!detail && (isAdmin || !detail.customer.registrationCompleted);
+  const [redeemAmount, setRedeemAmount] = useState('');
+
+  useEffect(() => {
+    setRedeemAmount('');
+  }, [detail?.customer.id]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -1053,6 +1161,40 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, on
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Списание баллов за покупку со скидкой</span>
+                {detail.customer.pointsRedeemed && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-medium">
+                    Списано {detail.customer.pointsRedeemedAmount.toFixed(1)}
+                  </span>
+                )}
+              </div>
+              {detail.customer.pointsRedeemed ? (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Icon name="CheckCircle2" size={13} className="text-accent" /> Баллы за эту покупку уже списаны, повторное списание невозможно
+                </p>
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    max={detail.customer.tempPoints}
+                    placeholder="Сколько баллов списать"
+                    value={redeemAmount}
+                    onChange={(e) => setRedeemAmount(e.target.value)}
+                  />
+                  <Button
+                    disabled={busy || !redeemAmount || Number(redeemAmount) <= 0}
+                    onClick={() => onRedeemPoints(detail.customer.id, Number(redeemAmount))}
+                  >
+                    <Icon name="Minus" size={16} className="mr-2" /> Списать
+                  </Button>
+                </div>
+              )}
             </div>
 
             {canEdit && (
@@ -1182,5 +1324,79 @@ function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function Birthdays({ customers, bonusAmount, sendSms, useBonus }: {
+  customers: BirthdayCustomer[];
+  bonusAmount: number;
+  sendSms: (id: number) => void;
+  useBonus: (id: number) => void;
+}) {
+  const upcoming = customers.filter((c) => !c.bonusActive).sort((a, b) => a.daysUntilBirthday - b.daysUntilBirthday);
+  const active = customers.filter((c) => c.bonusActive);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-bold font-display">Дни рождения</h1>
+        <p className="text-sm text-muted-foreground">
+          За 7 дней до дня рождения клиенту можно отправить SMS со скидкой {bonusAmount} ₽, действующей 10 календарных дней
+        </p>
+      </div>
+
+      {active.length > 0 && (
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-border bg-accent/10 text-xs uppercase tracking-wide text-accent font-medium">
+            Скидка активна ({active.length})
+          </div>
+          <div className="divide-y divide-border">
+            {active.map((c) => (
+              <div key={c.id} className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="font-medium">{c.name}</div>
+                  <div className="text-xs text-muted-foreground tabular">{c.phone} · ДР {c.birth}</div>
+                  <div className="text-xs text-accent mt-0.5">Скидка {bonusAmount} ₽ действует до {c.bonusExpires}</div>
+                </div>
+                <Button size="sm" onClick={() => useBonus(c.id)}>
+                  <Icon name="Gift" size={14} className="mr-1.5" /> Применить скидку
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border bg-secondary/70 text-xs uppercase tracking-wide text-muted-foreground font-medium">
+          Ближайшие дни рождения ({upcoming.length})
+        </div>
+        {upcoming.length === 0 && (
+          <div className="px-4 py-4 text-sm text-muted-foreground">Пока нет клиентов с приближающимся днём рождения</div>
+        )}
+        <div className="divide-y divide-border">
+          {upcoming.map((c) => (
+            <div key={c.id} className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="font-medium">{c.name}</div>
+                <div className="text-xs text-muted-foreground tabular">{c.phone} · ДР {c.birth}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {c.daysUntilBirthday === 0 ? 'День рождения сегодня' : `Через ${c.daysUntilBirthday} дн.`}
+                  {c.birthdayBonusNotifyDate && ' · SMS уже отправлено'}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!c.shouldNotify && !!c.birthdayBonusNotifyDate}
+                onClick={() => sendSms(c.id)}
+              >
+                <Icon name="MessageCircle" size={14} className="mr-1.5" /> Отправить SMS
+              </Button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

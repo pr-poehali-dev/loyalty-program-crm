@@ -2,6 +2,9 @@ import json
 import os
 import secrets
 import hashlib
+import datetime as dt
+import urllib.request
+import urllib.parse
 import psycopg2
 import psycopg2.extras
 
@@ -11,6 +14,9 @@ LIFETIME_CAP = 30
 VOUCHERS_PER_BATCH = 5
 POINTS_PER_AMOUNT = 1000  # 1 балл за каждую 1000 ₽ покупки
 LIFETIME_SHARE = 0.1  # доля временных баллов, уходящая в пожизненные
+BIRTHDAY_BONUS_AMOUNT = 200  # скидка в рублях к дню рождения
+BIRTHDAY_NOTIFY_DAYS_BEFORE = 7  # за сколько дней до ДР отправлять SMS
+BIRTHDAY_BONUS_WINDOW_DAYS = 10  # сколько календарных дней действует скидка с момента отправки SMS
 
 CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -59,6 +65,71 @@ def _customer_dict(row) -> dict:
         'sellerName': row['seller_name'] if 'seller_name' in keys else None,
         'sellerEmail': row['seller_email'] if 'seller_email' in keys else None,
         'registrationCompleted': row['registration_completed'] if 'registration_completed' in keys else False,
+        'pointsRedeemed': row['points_redeemed'] if 'points_redeemed' in keys else False,
+        'pointsRedeemedAmount': float(row['points_redeemed_amount']) if 'points_redeemed_amount' in keys else 0,
+        'birthdayBonusNotifyDate': str(row['birthday_bonus_notify_date']) if row.get('birthday_bonus_notify_date') else None,
+        'birthdayBonusUsedYear': row['birthday_bonus_used_year'] if 'birthday_bonus_used_year' in keys else None,
+    }
+
+
+def _send_sms(phone: str, text: str) -> bool:
+    api_id = os.environ.get('SMSRU_API_ID')
+    if not api_id:
+        return False
+    clean_phone = ''.join(ch for ch in phone if ch.isdigit())
+    if len(clean_phone) == 11 and clean_phone.startswith('8'):
+        clean_phone = '7' + clean_phone[1:]
+    params = urllib.parse.urlencode({
+        'api_id': api_id,
+        'to': clean_phone,
+        'msg': text,
+        'json': 1,
+    })
+    try:
+        req = urllib.request.Request(f'https://sms.ru/sms/send?{params}', method='GET')
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+        return data.get('status') == 'OK'
+    except Exception:
+        return False
+
+
+def _birthday_window(customer_row) -> dict:
+    '''Возвращает статус ДР-бонуса: нужно ли уведомлять, действует ли скидка сейчас.'''
+    birth = customer_row.get('birth')
+    if not birth:
+        return {'daysUntilBirthday': None, 'shouldNotify': False, 'bonusActive': False, 'bonusExpires': None}
+    today = dt.date.today()
+    try:
+        next_birthday = birth.replace(year=today.year)
+    except ValueError:
+        next_birthday = birth.replace(year=today.year, day=28)
+    if next_birthday < today:
+        try:
+            next_birthday = birth.replace(year=today.year + 1)
+        except ValueError:
+            next_birthday = birth.replace(year=today.year + 1, day=28)
+    days_until = (next_birthday - today).days
+
+    notify_date = customer_row.get('birthday_bonus_notify_date')
+    bonus_active = False
+    bonus_expires = None
+    if notify_date:
+        bonus_expires = notify_date + dt.timedelta(days=BIRTHDAY_BONUS_WINDOW_DAYS)
+        used_year = customer_row.get('birthday_bonus_used_year')
+        if today <= bonus_expires and used_year != next_birthday.year and used_year != (next_birthday.year - 1):
+            bonus_active = True
+
+    should_notify = (
+        days_until == BIRTHDAY_NOTIFY_DAYS_BEFORE
+        and (notify_date is None or notify_date.year != today.year)
+    )
+
+    return {
+        'daysUntilBirthday': days_until,
+        'shouldNotify': should_notify,
+        'bonusActive': bonus_active,
+        'bonusExpires': str(bonus_expires) if bonus_expires else None,
     }
 
 
@@ -462,6 +533,105 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return _resp(400, {'error': 'Нет доступных фиолок'})
             return _resp(200, {'customer': _customer_dict(row)})
+
+        if method == 'POST' and action == 'redeem_points':
+            cid = int(body.get('id'))
+            amount = body.get('amount')
+            try:
+                amount = round(float(amount), 1)
+            except (TypeError, ValueError):
+                return _resp(400, {'error': 'Укажите корректную сумму списания'})
+            if amount <= 0:
+                return _resp(400, {'error': 'Сумма списания должна быть больше нуля'})
+
+            if is_admin:
+                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
+            else:
+                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {'error': 'Покупатель не найден'})
+            if row['points_redeemed']:
+                return _resp(409, {'error': 'Баллы за эту покупку уже списаны'})
+            if amount > float(row['temp_points']):
+                return _resp(400, {'error': 'Недостаточно временных баллов для списания'})
+
+            new_temp = round(float(row['temp_points']) - amount, 1)
+            cur.execute(
+                """UPDATE customers SET temp_points = %s, points_redeemed = true, points_redeemed_amount = %s
+                   WHERE id = %s RETURNING *""",
+                (new_temp, amount, cid),
+            )
+            updated = cur.fetchone()
+            return _resp(200, {'customer': _customer_dict(updated)})
+
+        if method == 'GET' and action == 'birthday_bonuses':
+            if is_admin:
+                cur.execute(
+                    """SELECT c.*, s.name AS seller_name, s.email AS seller_email
+                       FROM customers c JOIN sellers s ON s.id = c.seller_id
+                       WHERE c.birth IS NOT NULL ORDER BY c.id"""
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM customers WHERE seller_id = %s AND birth IS NOT NULL ORDER BY id",
+                    (seller_id,),
+                )
+            rows = cur.fetchall()
+            result = []
+            for r in rows:
+                info = _birthday_window(r)
+                if info['daysUntilBirthday'] is not None and (info['daysUntilBirthday'] <= BIRTHDAY_NOTIFY_DAYS_BEFORE or info['bonusActive']):
+                    item = _customer_dict(r)
+                    item.update({
+                        'daysUntilBirthday': info['daysUntilBirthday'],
+                        'shouldNotify': info['shouldNotify'],
+                        'bonusActive': info['bonusActive'],
+                        'bonusExpires': info['bonusExpires'],
+                    })
+                    result.append(item)
+            return _resp(200, {'customers': result, 'bonusAmount': BIRTHDAY_BONUS_AMOUNT})
+
+        if method == 'POST' and action == 'send_birthday_sms':
+            cid = int(body.get('id'))
+            if is_admin:
+                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
+            else:
+                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {'error': 'Покупатель не найден'})
+            today = dt.date.today()
+            text = f"{row['name'].split(' ')[0]}, с наступающим Днём рождения! Дарим скидку {BIRTHDAY_BONUS_AMOUNT} ₽ на покупку в течение {BIRTHDAY_BONUS_WINDOW_DAYS} дней."
+            sent = _send_sms(row['phone'], text)
+            if not sent:
+                return _resp(502, {'error': 'Не удалось отправить SMS. Проверьте баланс и ключ SMS.ru'})
+            cur.execute(
+                "UPDATE customers SET birthday_bonus_notify_date = %s WHERE id = %s RETURNING *",
+                (today, cid),
+            )
+            updated = cur.fetchone()
+            return _resp(200, {'customer': _customer_dict(updated)})
+
+        if method == 'POST' and action == 'use_birthday_bonus':
+            cid = int(body.get('id'))
+            if is_admin:
+                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
+            else:
+                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {'error': 'Покупатель не найден'})
+            info = _birthday_window(row)
+            if not info['bonusActive']:
+                return _resp(400, {'error': 'Скидка ко дню рождения сейчас не активна'})
+            used_year = dt.date.today().year if row['birthday_bonus_notify_date'] is None else row['birthday_bonus_notify_date'].year
+            cur.execute(
+                "UPDATE customers SET birthday_bonus_used_year = %s WHERE id = %s RETURNING *",
+                (used_year, cid),
+            )
+            updated = cur.fetchone()
+            return _resp(200, {'customer': _customer_dict(updated)})
 
         return _resp(404, {'error': 'Неизвестное действие'})
 
