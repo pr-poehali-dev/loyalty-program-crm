@@ -669,7 +669,7 @@ function Points({ customers, stats }: { customers: Customer[]; stats: Stats }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold font-display">Баллы лояльности</h1>
-        <p className="text-sm text-muted-foreground">1 балл = {RUB} ₽ · начисление 1 балл за каждую 1000 ₽ покупки приглашённого · пожизненные лимит {LIFETIME_CAP}</p>
+        <p className="text-sm text-muted-foreground">1 балл = {RUB} ₽ · начисление 1 балл за каждого приведённого клиента, независимо от суммы покупки · пожизненные лимит {LIFETIME_CAP}</p>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">

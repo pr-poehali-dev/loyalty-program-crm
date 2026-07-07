@@ -12,7 +12,7 @@ import psycopg2.extras
 RUB = 100
 LIFETIME_CAP = 30
 VOUCHERS_PER_BATCH = 5
-POINTS_PER_AMOUNT = 1000  # 1 балл за каждую 1000 ₽ покупки
+POINTS_PER_REFERRAL = 1  # 1 балл (100 ₽) за каждого приведённого клиента, независимо от суммы его покупки
 LIFETIME_SHARE = 0.1  # доля временных баллов, уходящая в пожизненные
 BIRTHDAY_BONUS_AMOUNT = 200  # скидка в рублях к дню рождения
 BIRTHDAY_NOTIFY_DAYS_BEFORE = 7  # за сколько дней до ДР отправлять SMS
@@ -418,8 +418,7 @@ def handler(event: dict, context) -> dict:
                 cur.execute("SELECT name, temp_points, life_points, total_earned_points FROM customers WHERE id = %s", (new_ref_id,))
                 new_ref = cur.fetchone()
                 if new_ref:
-                    amount = purchase_amount or 0
-                    new_given = round(max(amount / POINTS_PER_AMOUNT, 1) if amount > 0 else 1, 1)
+                    new_given = POINTS_PER_REFERRAL
                     new_temp = round(float(new_ref['temp_points']) + new_given, 1)
                     new_life = min(round(float(new_ref['life_points']) + new_given * LIFETIME_SHARE, 1), LIFETIME_CAP)
                     new_total = round(float(new_ref['total_earned_points']) + new_given, 1)
@@ -506,8 +505,7 @@ def handler(event: dict, context) -> dict:
                 )
                 ref = cur.fetchone()
                 if ref:
-                    amount = purchase_amount or 0
-                    earned_points = round(max(amount / POINTS_PER_AMOUNT, 1) if amount > 0 else 1, 1)
+                    earned_points = POINTS_PER_REFERRAL
                     new_temp = round(float(ref['temp_points']) + earned_points, 1)
                     new_life = min(round(float(ref['life_points']) + earned_points * LIFETIME_SHARE, 1), LIFETIME_CAP)
                     new_total = round(float(ref['total_earned_points']) + earned_points, 1)
