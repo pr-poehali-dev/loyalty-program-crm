@@ -258,8 +258,6 @@ def handler(event: dict, context) -> dict:
             return _resp(200, {'id': new_id, 'email': email, 'name': name, 'inviteToken': token})
 
         if method == 'GET' and action == 'list_sellers':
-            if not is_admin:
-                return _resp(403, {'error': 'Доступно только администратору'})
             date_from = params.get('dateFrom') or None
             date_to = params.get('dateTo') or None
             cur.execute(

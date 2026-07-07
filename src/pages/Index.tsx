@@ -67,6 +67,7 @@ const sellerNav = [
   { key: 'points', label: 'Баллы', icon: 'Coins' },
   { key: 'vouchers', label: 'Фиолки', icon: 'Ticket' },
   { key: 'birthdays', label: 'Дни рождения', icon: 'Cake' },
+  { key: 'sellers', label: 'Продавцы', icon: 'Users' },
   { key: 'profile', label: 'Профиль', icon: 'UserCog' },
 ] as const;
 
@@ -172,8 +173,8 @@ export default function Index() {
 
   useEffect(() => {
     if (sellerId === null) return;
+    loadSellers(sellerId);
     if (isAdmin) {
-      loadSellers(sellerId);
       loadAllCustomers(sellerId);
     } else {
       loadCustomers(sellerId);
@@ -444,7 +445,7 @@ export default function Index() {
   if (!authed) return <Login {...{ email, setEmail, pass, setPass, login, busy }} />;
 
   const nav = isAdmin ? adminNav : sellerNav;
-  const activeTab = isAdmin && (tab === 'customers' || tab === 'points' || tab === 'vouchers') ? 'sellers' : tab;
+  const activeTab = isAdmin && (tab === 'customers' || tab === 'points' || tab === 'vouchers') ? 'allCustomers' : tab;
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans flex flex-col">
@@ -457,7 +458,7 @@ export default function Index() {
           )}
           {!isAdmin && activeTab === 'points' && <Points customers={customers} stats={stats} />}
           {!isAdmin && activeTab === 'vouchers' && <Vouchers customers={customers} spendVoucher={spendVoucher} />}
-          {isAdmin && activeTab === 'sellers' && (
+          {activeTab === 'sellers' && (
             <Sellers
               sellers={sellers}
               setInviteOpen={setInviteOpen}
@@ -467,6 +468,7 @@ export default function Index() {
               onDateFromChange={(v) => { setSellerDateFrom(v); loadSellers(sellerId as number, v, sellerDateTo); }}
               onDateToChange={(v) => { setSellerDateTo(v); loadSellers(sellerId as number, sellerDateFrom, v); }}
               onResetDates={() => { setSellerDateFrom(''); setSellerDateTo(''); loadSellers(sellerId as number); }}
+              isAdmin={isAdmin}
             />
           )}
           {isAdmin && activeTab === 'allCustomers' && (
@@ -758,10 +760,11 @@ function Vouchers({ customers, spendVoucher }: { customers: Customer[]; spendVou
   );
 }
 
-function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates }: {
+function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates, isAdmin }: {
   sellers: Seller[]; setInviteOpen: (v: boolean) => void; setSellerStatus: (id: number, status: 'active' | 'blocked') => void;
   dateFrom: string; dateTo: string;
   onDateFromChange: (v: string) => void; onDateToChange: (v: string) => void; onResetDates: () => void;
+  isAdmin: boolean;
 }) {
   const statusLabel = { invited: 'Ждёт активации', active: 'Активен', blocked: 'Заблокирован' } as const;
   const statusClass = {
@@ -779,11 +782,15 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold font-display">Продавцы</h1>
-          <p className="text-sm text-muted-foreground">Приглашение и управление доступом продавцов</p>
+          <p className="text-sm text-muted-foreground">
+            {isAdmin ? 'Приглашение и управление доступом продавцов' : 'Статистика продавцов команды'}
+          </p>
         </div>
-        <Button onClick={() => setInviteOpen(true)}>
-          <Icon name="UserPlus" size={16} className="mr-2" /> Пригласить продавца
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setInviteOpen(true)}>
+            <Icon name="UserPlus" size={16} className="mr-2" /> Пригласить продавца
+          </Button>
+        )}
       </div>
 
       <div className="flex items-end gap-3 flex-wrap bg-card border border-border rounded-lg p-4">
@@ -814,19 +821,19 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
             <thead>
               <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Имя</th>
-                <th className="px-4 py-3 font-medium">Email (логин)</th>
+                {isAdmin && <th className="px-4 py-3 font-medium">Email (логин)</th>}
                 <th className="px-4 py-3 font-medium">Статус</th>
                 <th className="px-4 py-3 font-medium text-right">Покупателей</th>
                 <th className="px-4 py-3 font-medium text-right">Смен отработано</th>
                 <th className="px-4 py-3 font-medium text-right">Ср. покупателей/смену</th>
-                <th className="px-4 py-3 font-medium text-right">Действия</th>
+                {isAdmin && <th className="px-4 py-3 font-medium text-right">Действия</th>}
               </tr>
             </thead>
             <tbody>
               {sellers.map((s) => (
                 <tr key={s.id} className="border-t border-border hover:bg-secondary/40 transition-colors">
                   <td className="px-4 py-3 font-medium">{s.name}</td>
-                  <td className="px-4 py-3 tabular text-muted-foreground">{s.email}</td>
+                  {isAdmin && <td className="px-4 py-3 tabular text-muted-foreground">{s.email}</td>}
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusClass[s.status]}`}>
                       {statusLabel[s.status]}
@@ -840,19 +847,21 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
                   <td className="px-4 py-3 text-right tabular font-semibold">
                     {s.workingDays > 0 ? (s.customersCount / s.workingDays).toFixed(1) : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    {s.role !== 'admin' && s.status !== 'invited' && (
-                      s.status === 'active' ? (
-                        <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'blocked')}>
-                          <Icon name="Ban" size={14} className="mr-1" /> Заблокировать
-                        </Button>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'active')}>
-                          <Icon name="CheckCircle" size={14} className="mr-1" /> Разблокировать
-                        </Button>
-                      )
-                    )}
-                  </td>
+                  {isAdmin && (
+                    <td className="px-4 py-3 text-right">
+                      {s.role !== 'admin' && s.status !== 'invited' && (
+                        s.status === 'active' ? (
+                          <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'blocked')}>
+                            <Icon name="Ban" size={14} className="mr-1" /> Заблокировать
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'active')}>
+                            <Icon name="CheckCircle" size={14} className="mr-1" /> Разблокировать
+                          </Button>
+                        )
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
