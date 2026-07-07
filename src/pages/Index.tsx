@@ -635,7 +635,7 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold font-display">Покупатели</h1>
-          <p className="text-sm text-muted-foreground">Единая цепочка приглашений любой длины · нажмите на строку для подробностей</p>
+          <p className="text-sm text-muted-foreground">Общая база всех продавцов · нажмите на строку для подробностей</p>
         </div>
         <Button onClick={() => setAddOpen(true)}>
           <Icon name="UserPlus" size={16} className="mr-2" /> Добавить покупателя
@@ -656,6 +656,7 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
               <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Ф.И.О.</th>
                 <th className="px-4 py-3 font-medium">Телефон</th>
+                <th className="px-4 py-3 font-medium">Продавец</th>
                 <th className="px-4 py-3 font-medium">Пригласил</th>
                 <th className="px-4 py-3 font-medium">Товар</th>
                 <th className="px-4 py-3 font-medium text-right">Объём, ₽</th>
@@ -670,6 +671,7 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">{c.name}<div className="text-xs text-muted-foreground font-normal">с {c.joined}</div></td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{c.sellerName || '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground">{refName(c.refId)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.productName || '—'}</td>
                   <td className="px-4 py-3 text-right tabular">{c.purchaseAmount ? c.purchaseAmount.toLocaleString('ru') : '—'}</td>

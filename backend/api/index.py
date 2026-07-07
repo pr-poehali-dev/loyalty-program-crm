@@ -292,8 +292,6 @@ def handler(event: dict, context) -> dict:
             return _resp(200, {'ok': True})
 
         if method == 'GET' and action == 'all_customers':
-            if not is_admin:
-                return _resp(403, {'error': 'Доступно только администратору'})
             cur.execute(
                 """SELECT c.*, s.name AS seller_name, s.email AS seller_email,
                           (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
@@ -303,23 +301,16 @@ def handler(event: dict, context) -> dict:
             rows = cur.fetchall()
             return _resp(200, {'customers': [_customer_dict(r) for r in rows]})
 
-        # ---- Общие действия продавца ----
+        # ---- Общие действия продавца (база покупателей общая для всех продавцов) ----
         if method == 'GET' and action == 'customer_detail':
             cid = params.get('id')
             if not cid:
                 return _resp(400, {'error': 'Не указан id покупателя'})
-            if is_admin:
-                cur.execute(
-                    """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
-                       FROM customers c WHERE c.id = %s""",
-                    (int(cid),),
-                )
-            else:
-                cur.execute(
-                    """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
-                       FROM customers c WHERE c.id = %s AND c.seller_id = %s""",
-                    (int(cid), seller_id),
-                )
+            cur.execute(
+                """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                   FROM customers c WHERE c.id = %s""",
+                (int(cid),),
+            )
             row = cur.fetchone()
             if not row:
                 return _resp(404, {'error': 'Покупатель не найден'})
@@ -336,10 +327,7 @@ def handler(event: dict, context) -> dict:
 
         if method == 'POST' and action == 'complete_registration':
             cid = int(body.get('id'))
-            if is_admin:
-                cur.execute("SELECT id, seller_id FROM customers WHERE id = %s", (cid,))
-            else:
-                cur.execute("SELECT id, seller_id FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            cur.execute("SELECT id, seller_id FROM customers WHERE id = %s", (cid,))
             target = cur.fetchone()
             if not target:
                 return _resp(404, {'error': 'Покупатель не найден'})
@@ -352,17 +340,12 @@ def handler(event: dict, context) -> dict:
 
         if method == 'POST' and action == 'edit_customer':
             cid = int(body.get('id'))
-            if is_admin:
-                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
-            else:
-                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
             row = cur.fetchone()
             if not row:
                 return _resp(404, {'error': 'Покупатель не найден'})
             if row['registration_completed'] and not is_admin:
                 return _resp(403, {'error': 'Регистрация завершена, редактирование доступно только администратору'})
-
-            owner_seller_id = row['seller_id']
 
             name = (body.get('name') or row['name']).strip()
             phone = (body.get('phone') or row['phone']).strip()
@@ -384,20 +367,20 @@ def handler(event: dict, context) -> dict:
                 return _resp(400, {'error': 'Покупатель не может пригласить самого себя'})
 
             if new_ref_id:
-                cur.execute("SELECT id FROM customers WHERE id = %s AND seller_id = %s", (new_ref_id, owner_seller_id))
+                cur.execute("SELECT id FROM customers WHERE id = %s", (new_ref_id,))
                 if not cur.fetchone():
                     return _resp(400, {'error': 'Пригласивший покупатель не найден'})
                 cur.execute(
                     """WITH RECURSIVE chain AS (
                            SELECT id, ref_id, 1 AS depth FROM customers
-                           WHERE id = %s AND seller_id = %s
+                           WHERE id = %s
                            UNION ALL
                            SELECT c.id, c.ref_id, chain.depth + 1
                            FROM customers c JOIN chain ON c.id = chain.ref_id
                            WHERE chain.depth < 1000
                        )
                        SELECT count(*) AS cnt, count(DISTINCT id) AS distinct_cnt FROM chain""",
-                    (new_ref_id, owner_seller_id),
+                    (new_ref_id,),
                 )
                 chain_check = cur.fetchone()
                 if chain_check['cnt'] != chain_check['distinct_cnt']:
@@ -448,9 +431,10 @@ def handler(event: dict, context) -> dict:
 
         if method == 'GET':
             cur.execute(
-                """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
-                   FROM customers c WHERE c.seller_id = %s ORDER BY c.id""",
-                (seller_id,),
+                """SELECT c.*, s.name AS seller_name, s.email AS seller_email,
+                          (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
+                   FROM customers c JOIN sellers s ON s.id = c.seller_id
+                   ORDER BY c.id"""
             )
             rows = cur.fetchall()
             return _resp(200, {'customers': [_customer_dict(r) for r in rows]})
@@ -469,10 +453,7 @@ def handler(event: dict, context) -> dict:
             purchase_date = body.get('purchaseDate') or None
 
             if ref_id:
-                cur.execute(
-                    "SELECT id FROM customers WHERE id = %s AND seller_id = %s",
-                    (ref_id, seller_id),
-                )
+                cur.execute("SELECT id FROM customers WHERE id = %s", (ref_id,))
                 if not cur.fetchone():
                     return _resp(400, {'error': 'Пригласивший покупатель не найден'})
 
@@ -481,14 +462,14 @@ def handler(event: dict, context) -> dict:
                 cur.execute(
                     """WITH RECURSIVE chain AS (
                            SELECT id, ref_id, 1 AS depth FROM customers
-                           WHERE id = %s AND seller_id = %s
+                           WHERE id = %s
                            UNION ALL
                            SELECT c.id, c.ref_id, chain.depth + 1
                            FROM customers c JOIN chain ON c.id = chain.ref_id
                            WHERE chain.depth < 1000
                        )
                        SELECT count(*) AS cnt, count(DISTINCT id) AS distinct_cnt FROM chain""",
-                    (ref_id, seller_id),
+                    (ref_id,),
                 )
                 chain_check = cur.fetchone()
                 if chain_check['cnt'] != chain_check['distinct_cnt']:
@@ -508,8 +489,8 @@ def handler(event: dict, context) -> dict:
             earned_points = None
             if ref_id:
                 cur.execute(
-                    "SELECT name, temp_points, life_points, total_earned_points FROM customers WHERE id = %s AND seller_id = %s",
-                    (ref_id, seller_id),
+                    "SELECT name, temp_points, life_points, total_earned_points FROM customers WHERE id = %s",
+                    (ref_id,),
                 )
                 ref = cur.fetchone()
                 if ref:
@@ -532,8 +513,8 @@ def handler(event: dict, context) -> dict:
         if method == 'POST' and action == 'spend_voucher':
             cid = int(body.get('id'))
             cur.execute(
-                "UPDATE customers SET vouchers = vouchers - 1 WHERE id = %s AND seller_id = %s AND vouchers > 0 RETURNING *",
-                (cid, seller_id),
+                "UPDATE customers SET vouchers = vouchers - 1 WHERE id = %s AND vouchers > 0 RETURNING *",
+                (cid,),
             )
             row = cur.fetchone()
             if not row:
@@ -550,10 +531,7 @@ def handler(event: dict, context) -> dict:
             if amount <= 0:
                 return _resp(400, {'error': 'Сумма списания должна быть больше нуля'})
 
-            if is_admin:
-                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
-            else:
-                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
             row = cur.fetchone()
             if not row:
                 return _resp(404, {'error': 'Покупатель не найден'})
@@ -572,17 +550,11 @@ def handler(event: dict, context) -> dict:
             return _resp(200, {'customer': _customer_dict(updated)})
 
         if method == 'GET' and action == 'birthday_bonuses':
-            if is_admin:
-                cur.execute(
-                    """SELECT c.*, s.name AS seller_name, s.email AS seller_email
-                       FROM customers c JOIN sellers s ON s.id = c.seller_id
-                       WHERE c.birth IS NOT NULL ORDER BY c.id"""
-                )
-            else:
-                cur.execute(
-                    "SELECT * FROM customers WHERE seller_id = %s AND birth IS NOT NULL ORDER BY id",
-                    (seller_id,),
-                )
+            cur.execute(
+                """SELECT c.*, s.name AS seller_name, s.email AS seller_email
+                   FROM customers c JOIN sellers s ON s.id = c.seller_id
+                   WHERE c.birth IS NOT NULL ORDER BY c.id"""
+            )
             rows = cur.fetchall()
             result = []
             for r in rows:
@@ -600,10 +572,7 @@ def handler(event: dict, context) -> dict:
 
         if method == 'POST' and action == 'send_birthday_sms':
             cid = int(body.get('id'))
-            if is_admin:
-                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
-            else:
-                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
             row = cur.fetchone()
             if not row:
                 return _resp(404, {'error': 'Покупатель не найден'})
@@ -621,10 +590,7 @@ def handler(event: dict, context) -> dict:
 
         if method == 'POST' and action == 'use_birthday_bonus':
             cid = int(body.get('id'))
-            if is_admin:
-                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
-            else:
-                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
             row = cur.fetchone()
             if not row:
                 return _resp(404, {'error': 'Покупатель не найден'})
