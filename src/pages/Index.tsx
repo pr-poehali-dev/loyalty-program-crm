@@ -36,6 +36,7 @@ type Customer = {
   invitedCount: number;
   sellerName?: string | null;
   sellerEmail?: string | null;
+  registrationCompleted: boolean;
 };
 
 type Seller = {
@@ -93,6 +94,7 @@ export default function Index() {
   const [detail, setDetail] = useState<{ customer: Customer; invited: Customer[] } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
 
   const authed = sellerId !== null;
   const isAdmin = role === 'admin';
@@ -198,6 +200,55 @@ export default function Index() {
       toast.error('Сервер недоступен');
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const refreshAfterMutation = async () => {
+    if (sellerId === null) return;
+    if (isAdmin) await loadAllCustomers(sellerId);
+    else await loadCustomers(sellerId);
+    if (detailId !== null) await openDetail(detailId);
+  };
+
+  const saveEditedCustomer = async (payload: Partial<Form> & { id: number }) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}?action=edit_customer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось сохранить изменения');
+        return;
+      }
+      toast.success('Данные покупателя обновлены');
+      await refreshAfterMutation();
+      setEditCustomer(null);
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const completeRegistration = async (id: number) => {
+    try {
+      const res = await fetch(`${API_URL}?action=complete_registration`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось завершить регистрацию');
+        return;
+      }
+      toast.success('Регистрация завершена, редактирование закрыто');
+      await refreshAfterMutation();
+    } catch {
+      toast.error('Сервер недоступен');
     }
   };
 
@@ -328,6 +379,16 @@ export default function Index() {
         onOpenChange={(v) => !v && setDetailId(null)}
         loading={detailLoading}
         detail={detail}
+        isAdmin={isAdmin}
+        onEdit={(c) => setEditCustomer(c)}
+        onComplete={completeRegistration}
+      />
+      <EditCustomerDialog
+        customer={editCustomer}
+        onClose={() => setEditCustomer(null)}
+        onSave={saveEditedCustomer}
+        allCustomers={isAdmin ? allCustomers : customers}
+        busy={busy}
       />
       {isAdmin && (
         <InviteSellerDialog open={inviteOpen} setOpen={setInviteOpen} inviteSeller={inviteSeller} />
@@ -933,10 +994,14 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, customers,
   );
 }
 
-function CustomerDetailDialog({ open, onOpenChange, loading, detail }: {
+function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, onEdit, onComplete }: {
   open: boolean; onOpenChange: (v: boolean) => void; loading: boolean;
   detail: { customer: Customer; invited: Customer[] } | null;
+  isAdmin: boolean;
+  onEdit: (c: Customer) => void;
+  onComplete: (id: number) => void;
 }) {
+  const canEdit = !!detail && (isAdmin || !detail.customer.registrationCompleted);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -950,10 +1015,15 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail }: {
         )}
         {!loading && detail && (
           <div className="space-y-5">
-            <div>
-              <div className="font-semibold text-lg">{detail.customer.name}</div>
-              <div className="text-sm text-muted-foreground tabular">{detail.customer.phone}</div>
-              <div className="text-xs text-muted-foreground mt-1">Покупатель с {detail.customer.joined}</div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-semibold text-lg">{detail.customer.name}</div>
+                <div className="text-sm text-muted-foreground tabular">{detail.customer.phone}</div>
+                <div className="text-xs text-muted-foreground mt-1">Покупатель с {detail.customer.joined}</div>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${detail.customer.registrationCompleted ? 'bg-secondary text-muted-foreground' : 'bg-accent/10 text-accent'}`}>
+                {detail.customer.registrationCompleted ? 'Регистрация завершена' : 'Регистрация открыта'}
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -984,8 +1054,132 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail }: {
                 ))}
               </div>
             </div>
+
+            {canEdit && (
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" onClick={() => onEdit(detail.customer)}>
+                  <Icon name="Pencil" size={16} className="mr-2" /> Редактировать
+                </Button>
+                {!detail.customer.registrationCompleted && (
+                  <Button onClick={() => onComplete(detail.customer.id)}>
+                    <Icon name="CheckCircle2" size={16} className="mr-2" /> Завершить регистрацию
+                  </Button>
+                )}
+              </div>
+            )}
+            {!canEdit && detail.customer.registrationCompleted && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Icon name="Lock" size={13} /> Регистрация завершена — изменения доступны только администратору
+              </p>
+            )}
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type EditForm = {
+  name: string; phone: string; birth: string; refId: string;
+  productName: string; purchaseAmount: string; purchaseDate: string;
+};
+
+function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
+  customer: Customer | null;
+  onClose: () => void;
+  onSave: (payload: Partial<EditForm> & { id: number }) => void;
+  allCustomers: Customer[];
+  busy: boolean;
+}) {
+  const [form, setForm] = useState<EditForm>({
+    name: '', phone: '', birth: '', refId: '', productName: '', purchaseAmount: '', purchaseDate: '',
+  });
+
+  useEffect(() => {
+    if (customer) {
+      setForm({
+        name: customer.name,
+        phone: customer.phone,
+        birth: customer.birth || '',
+        refId: customer.refId ? String(customer.refId) : '',
+        productName: customer.productName || '',
+        purchaseAmount: customer.purchaseAmount ? String(customer.purchaseAmount) : '',
+        purchaseDate: customer.purchaseDate || '',
+      });
+    }
+  }, [customer]);
+
+  if (!customer) return null;
+
+  const save = () => {
+    if (!form.name.trim() || !form.phone.trim()) {
+      toast.error('Заполните Ф.И.О. и телефон');
+      return;
+    }
+    onSave({
+      id: customer.id,
+      name: form.name,
+      phone: form.phone,
+      birth: form.birth,
+      refId: form.refId,
+      productName: form.productName,
+      purchaseAmount: form.purchaseAmount,
+      purchaseDate: form.purchaseDate,
+    });
+  };
+
+  return (
+    <Dialog open={!!customer} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="font-display">Редактирование покупателя</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Ф.И.О.</Label>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Телефон</Label>
+              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Дата рождения</Label>
+              <Input type="date" value={form.birth} onChange={(e) => setForm({ ...form, birth: e.target.value })} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Кто пригласил (необязательно)</Label>
+            <select value={form.refId} onChange={(e) => setForm({ ...form, refId: e.target.value })}
+              className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm">
+              <option value="">— без приглашения —</option>
+              {allCustomers.filter((c) => c.id !== customer.id).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Наименование товара</Label>
+            <Input value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Объём покупки, ₽</Label>
+              <Input type="number" min="0" value={form.purchaseAmount} onChange={(e) => setForm({ ...form, purchaseAmount: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Дата покупки</Label>
+              <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Отмена</Button>
+          <Button onClick={save} disabled={busy}>
+            {busy ? 'Сохранение…' : 'Сохранить изменения'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

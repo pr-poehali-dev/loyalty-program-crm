@@ -58,6 +58,7 @@ def _customer_dict(row) -> dict:
         'invitedCount': row['invited_count'] if 'invited_count' in keys else 0,
         'sellerName': row['seller_name'] if 'seller_name' in keys else None,
         'sellerEmail': row['seller_email'] if 'seller_email' in keys else None,
+        'registrationCompleted': row['registration_completed'] if 'registration_completed' in keys else False,
     }
 
 
@@ -254,6 +255,119 @@ def handler(event: dict, context) -> dict:
                 'invited': [_customer_dict(r) for r in invited_rows],
             })
 
+        if method == 'POST' and action == 'complete_registration':
+            cid = int(body.get('id'))
+            if is_admin:
+                cur.execute("SELECT id, seller_id FROM customers WHERE id = %s", (cid,))
+            else:
+                cur.execute("SELECT id, seller_id FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            target = cur.fetchone()
+            if not target:
+                return _resp(404, {'error': 'Покупатель не найден'})
+            cur.execute(
+                "UPDATE customers SET registration_completed = true WHERE id = %s RETURNING *",
+                (cid,),
+            )
+            row = cur.fetchone()
+            return _resp(200, {'customer': _customer_dict(row)})
+
+        if method == 'POST' and action == 'edit_customer':
+            cid = int(body.get('id'))
+            if is_admin:
+                cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
+            else:
+                cur.execute("SELECT * FROM customers WHERE id = %s AND seller_id = %s", (cid, seller_id))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {'error': 'Покупатель не найден'})
+            if row['registration_completed'] and not is_admin:
+                return _resp(403, {'error': 'Регистрация завершена, редактирование доступно только администратору'})
+
+            owner_seller_id = row['seller_id']
+
+            name = (body.get('name') or row['name']).strip()
+            phone = (body.get('phone') or row['phone']).strip()
+            if not name or not phone:
+                return _resp(400, {'error': 'Укажите Ф.И.О. и телефон'})
+            birth = body.get('birth') if 'birth' in body else (str(row['birth']) if row['birth'] else None)
+            birth = birth or None
+            product_name = (body.get('productName').strip() if body.get('productName') is not None else row['product_name']) or None
+            purchase_amount = body.get('purchaseAmount')
+            if purchase_amount is None and 'purchaseAmount' not in body:
+                purchase_amount = float(row['purchase_amount']) if row['purchase_amount'] is not None else None
+            else:
+                purchase_amount = float(purchase_amount) if purchase_amount not in (None, '') else None
+            purchase_date = body.get('purchaseDate') if body.get('purchaseDate') else (str(row['purchase_date']) if row['purchase_date'] else None)
+
+            new_ref_id = body.get('refId') if 'refId' in body else row['ref_id']
+            new_ref_id = int(new_ref_id) if new_ref_id else None
+            if new_ref_id == cid:
+                return _resp(400, {'error': 'Покупатель не может пригласить самого себя'})
+
+            if new_ref_id:
+                cur.execute("SELECT id FROM customers WHERE id = %s AND seller_id = %s", (new_ref_id, owner_seller_id))
+                if not cur.fetchone():
+                    return _resp(400, {'error': 'Пригласивший покупатель не найден'})
+                cur.execute(
+                    """WITH RECURSIVE chain AS (
+                           SELECT id, ref_id, 1 AS depth FROM customers
+                           WHERE id = %s AND seller_id = %s
+                           UNION ALL
+                           SELECT c.id, c.ref_id, chain.depth + 1
+                           FROM customers c JOIN chain ON c.id = chain.ref_id
+                           WHERE chain.depth < 1000
+                       )
+                       SELECT count(*) AS cnt, count(DISTINCT id) AS distinct_cnt FROM chain""",
+                    (new_ref_id, owner_seller_id),
+                )
+                chain_check = cur.fetchone()
+                if chain_check['cnt'] != chain_check['distinct_cnt']:
+                    return _resp(400, {'error': 'Обнаружена закольцованная цепочка приглашений'})
+
+            old_ref_id = row['ref_id']
+            old_given = float(row['earned_points_given'])
+
+            # Откатываем ранее начисленные баллы старому пригласившему
+            if old_ref_id and old_given > 0:
+                cur.execute("SELECT temp_points, life_points, total_earned_points FROM customers WHERE id = %s", (old_ref_id,))
+                old_ref = cur.fetchone()
+                if old_ref:
+                    reverted_temp = max(round(float(old_ref['temp_points']) - old_given, 1), 0)
+                    reverted_life = max(round(float(old_ref['life_points']) - old_given * LIFETIME_SHARE, 1), 0)
+                    reverted_total = max(round(float(old_ref['total_earned_points']) - old_given, 1), 0)
+                    cur.execute(
+                        "UPDATE customers SET temp_points = %s, life_points = %s, total_earned_points = %s WHERE id = %s",
+                        (reverted_temp, reverted_life, reverted_total, old_ref_id),
+                    )
+
+            # Начисляем баллы новому пригласившему (если указан)
+            new_given = 0.0
+            notify = None
+            if new_ref_id:
+                cur.execute("SELECT name, temp_points, life_points, total_earned_points FROM customers WHERE id = %s", (new_ref_id,))
+                new_ref = cur.fetchone()
+                if new_ref:
+                    amount = purchase_amount or 0
+                    new_given = round(max(amount / POINTS_PER_AMOUNT, 1) if amount > 0 else 1, 1)
+                    new_temp = round(float(new_ref['temp_points']) + new_given, 1)
+                    new_life = min(round(float(new_ref['life_points']) + new_given * LIFETIME_SHARE, 1), LIFETIME_CAP)
+                    new_total = round(float(new_ref['total_earned_points']) + new_given, 1)
+                    cur.execute(
+                        "UPDATE customers SET temp_points = %s, life_points = %s, total_earned_points = %s WHERE id = %s",
+                        (new_temp, new_life, new_total, new_ref_id),
+                    )
+                    notify = new_ref['name'].split(' ')[0]
+
+            cur.execute(
+                """UPDATE customers SET name = %s, phone = %s, birth = %s, ref_id = %s,
+                          product_name = %s, purchase_amount = %s, purchase_date = COALESCE(%s, purchase_date),
+                          earned_points_given = %s
+                   WHERE id = %s RETURNING *""",
+                (name, phone, birth, new_ref_id, product_name, purchase_amount, purchase_date, new_given, cid),
+            )
+            updated = cur.fetchone()
+            return _resp(200, {'customer': _customer_dict(updated), 'notify': notify, 'earnedPoints': new_given or None})
+
         if method == 'GET':
             cur.execute(
                 """SELECT c.*, (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
@@ -329,6 +443,10 @@ def handler(event: dict, context) -> dict:
                     cur.execute(
                         "UPDATE customers SET temp_points = %s, life_points = %s, total_earned_points = %s WHERE id = %s",
                         (new_temp, new_life, new_total, ref_id),
+                    )
+                    cur.execute(
+                        "UPDATE customers SET earned_points_given = %s WHERE id = %s",
+                        (earned_points, new_row['id']),
                     )
                     notify = ref['name'].split(' ')[0]
 
