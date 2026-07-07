@@ -213,7 +213,7 @@ export default function Index() {
           )}
           {tab === 'points' && <Points customers={customers} stats={stats} />}
           {tab === 'vouchers' && <Vouchers customers={customers} spendVoucher={spendVoucher} />}
-          {tab === 'profile' && <Profile email={email} logout={logout} stats={stats} count={customers.length} />}
+          {tab === 'profile' && <Profile email={email} logout={logout} stats={stats} count={customers.length} sellerId={sellerId as number} />}
         </main>
       </div>
       <MobileNav tab={tab} setTab={setTab} />
@@ -471,9 +471,46 @@ function Vouchers({ customers, spendVoucher }: { customers: Customer[]; spendVou
   );
 }
 
-function Profile({ email, logout, stats, count }: {
-  email: string; logout: () => void; stats: Stats; count: number;
+function Profile({ email, logout, stats, count, sellerId }: {
+  email: string; logout: () => void; stats: Stats; count: number; sellerId: number;
 }) {
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changing, setChanging] = useState(false);
+
+  const changePassword = async () => {
+    if (!oldPassword || newPassword.length < 3) {
+      toast.error('Заполните текущий и новый пароль (минимум 3 символа)');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Новый пароль и подтверждение не совпадают');
+      return;
+    }
+    setChanging(true);
+    try {
+      const res = await fetch(`${API_URL}?action=change_password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ oldPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось сменить пароль');
+        return;
+      }
+      toast.success('Пароль успешно изменён');
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setChanging(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -500,6 +537,27 @@ function Profile({ email, logout, stats, count }: {
             <Icon name="Check" size={15} className="text-accent" /> {p}
           </div>
         ))}
+      </div>
+      <div className="bg-card border border-border rounded-lg p-5 space-y-4">
+        <div className="font-medium">Смена пароля</div>
+        <div className="space-y-1.5">
+          <Label className="text-xs uppercase tracking-wide text-muted-foreground">Текущий пароль</Label>
+          <Input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} placeholder="••••••••" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Новый пароль</Label>
+            <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Повторите пароль</Label>
+            <Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && changePassword()} />
+          </div>
+        </div>
+        <Button onClick={changePassword} disabled={changing}>
+          <Icon name={changing ? 'Loader2' : 'KeyRound'} size={16} className={`mr-2 ${changing ? 'animate-spin' : ''}`} />
+          {changing ? 'Сохранение…' : 'Сменить пароль'}
+        </Button>
       </div>
       <Button variant="outline" onClick={logout}>
         <Icon name="LogOut" size={16} className="mr-2" /> Выйти

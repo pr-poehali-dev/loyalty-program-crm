@@ -106,6 +106,24 @@ def handler(event: dict, context) -> dict:
             return _resp(401, {'error': 'Требуется авторизация'})
         seller_id = int(seller_id)
 
+        if method == 'POST' and action == 'change_password':
+            old_password = body.get('oldPassword') or ''
+            new_password = body.get('newPassword') or ''
+            if len(new_password) < 3:
+                return _resp(400, {'error': 'Новый пароль слишком короткий'})
+            cur.execute("SELECT password_hash FROM sellers WHERE id = %s", (seller_id,))
+            seller = cur.fetchone()
+            if not seller:
+                return _resp(404, {'error': 'Продавец не найден'})
+            ok = seller['password_hash'] == old_password or seller['password_hash'] == _hash(old_password)
+            if not ok:
+                return _resp(401, {'error': 'Текущий пароль указан неверно'})
+            cur.execute(
+                "UPDATE sellers SET password_hash = %s WHERE id = %s",
+                (_hash(new_password), seller_id),
+            )
+            return _resp(200, {'ok': True})
+
         if method == 'GET' and action == 'customer_detail':
             cid = params.get('id')
             if not cid:
