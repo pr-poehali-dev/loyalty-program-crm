@@ -111,6 +111,8 @@ export default function Index() {
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [birthdayCustomers, setBirthdayCustomers] = useState<BirthdayCustomer[]>([]);
   const [birthdayBonusAmount, setBirthdayBonusAmount] = useState(200);
+  const [sellerDateFrom, setSellerDateFrom] = useState('');
+  const [sellerDateTo, setSellerDateTo] = useState('');
 
   const authed = sellerId !== null;
   const isAdmin = role === 'admin';
@@ -132,9 +134,12 @@ export default function Index() {
     }
   };
 
-  const loadSellers = async (sid: number) => {
+  const loadSellers = async (sid: number, dateFrom?: string, dateTo?: string) => {
     try {
-      const res = await fetch(`${API_URL}?action=list_sellers`, { headers: { 'X-Seller-Id': String(sid) } });
+      const qs = new URLSearchParams({ action: 'list_sellers' });
+      if (dateFrom) qs.set('dateFrom', dateFrom);
+      if (dateTo) qs.set('dateTo', dateTo);
+      const res = await fetch(`${API_URL}?${qs.toString()}`, { headers: { 'X-Seller-Id': String(sid) } });
       const data = await res.json();
       if (res.ok) setSellers(data.sellers || []);
     } catch {
@@ -453,7 +458,16 @@ export default function Index() {
           {!isAdmin && activeTab === 'points' && <Points customers={customers} stats={stats} />}
           {!isAdmin && activeTab === 'vouchers' && <Vouchers customers={customers} spendVoucher={spendVoucher} />}
           {isAdmin && activeTab === 'sellers' && (
-            <Sellers sellers={sellers} setInviteOpen={setInviteOpen} setSellerStatus={setSellerStatus} />
+            <Sellers
+              sellers={sellers}
+              setInviteOpen={setInviteOpen}
+              setSellerStatus={setSellerStatus}
+              dateFrom={sellerDateFrom}
+              dateTo={sellerDateTo}
+              onDateFromChange={(v) => { setSellerDateFrom(v); loadSellers(sellerId as number, v, sellerDateTo); }}
+              onDateToChange={(v) => { setSellerDateTo(v); loadSellers(sellerId as number, sellerDateFrom, v); }}
+              onResetDates={() => { setSellerDateFrom(''); setSellerDateTo(''); loadSellers(sellerId as number); }}
+            />
           )}
           {isAdmin && activeTab === 'allCustomers' && (
             <AllCustomers customers={allCustomers} openDetail={openDetail} />
@@ -744,8 +758,10 @@ function Vouchers({ customers, spendVoucher }: { customers: Customer[]; spendVou
   );
 }
 
-function Sellers({ sellers, setInviteOpen, setSellerStatus }: {
+function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates }: {
   sellers: Seller[]; setInviteOpen: (v: boolean) => void; setSellerStatus: (id: number, status: 'active' | 'blocked') => void;
+  dateFrom: string; dateTo: string;
+  onDateFromChange: (v: string) => void; onDateToChange: (v: string) => void; onResetDates: () => void;
 }) {
   const statusLabel = { invited: 'Ждёт активации', active: 'Активен', blocked: 'Заблокирован' } as const;
   const statusClass = {
@@ -757,6 +773,7 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus }: {
   const totalCustomers = sellersOnly.reduce((s, x) => s + x.customersCount, 0);
   const totalDays = sellersOnly.reduce((s, x) => s + x.workingDays, 0);
   const avgPerShift = totalDays > 0 ? totalCustomers / totalDays : 0;
+  const hasFilter = !!dateFrom || !!dateTo;
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -769,9 +786,25 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus }: {
         </Button>
       </div>
 
+      <div className="flex items-end gap-3 flex-wrap bg-card border border-border rounded-lg p-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Период с</Label>
+          <Input type="date" value={dateFrom} onChange={(e) => onDateFromChange(e.target.value)} className="w-40" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">по</Label>
+          <Input type="date" value={dateTo} onChange={(e) => onDateToChange(e.target.value)} className="w-40" />
+        </div>
+        {hasFilter && (
+          <Button variant="outline" size="sm" onClick={onResetDates}>
+            <Icon name="X" size={14} className="mr-1.5" /> Сбросить период
+          </Button>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <Stat icon="Users" label="Продавцов" value={sellersOnly.length} />
-        <Stat icon="UserPlus" label="Всего покупателей" value={totalCustomers} />
+        <Stat icon="UserPlus" label={hasFilter ? 'Покупателей за период' : 'Всего покупателей'} value={totalCustomers} />
         <Stat icon="TrendingUp" label="В среднем за смену" value={avgPerShift.toFixed(1)} accent />
       </div>
 

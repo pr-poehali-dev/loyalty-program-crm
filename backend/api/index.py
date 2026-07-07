@@ -260,11 +260,18 @@ def handler(event: dict, context) -> dict:
         if method == 'GET' and action == 'list_sellers':
             if not is_admin:
                 return _resp(403, {'error': 'Доступно только администратору'})
+            date_from = params.get('dateFrom') or None
+            date_to = params.get('dateTo') or None
             cur.execute(
                 """SELECT s.*,
-                          (SELECT COUNT(*) FROM customers c WHERE c.seller_id = s.id) AS customers_count,
-                          (SELECT COUNT(DISTINCT c.joined) FROM customers c WHERE c.seller_id = s.id) AS working_days
-                   FROM sellers s ORDER BY s.id"""
+                          (SELECT COUNT(*) FROM customers c WHERE c.seller_id = s.id
+                            AND (%(date_from)s::date IS NULL OR c.joined >= %(date_from)s::date)
+                            AND (%(date_to)s::date IS NULL OR c.joined <= %(date_to)s::date)) AS customers_count,
+                          (SELECT COUNT(DISTINCT c.joined) FROM customers c WHERE c.seller_id = s.id
+                            AND (%(date_from)s::date IS NULL OR c.joined >= %(date_from)s::date)
+                            AND (%(date_to)s::date IS NULL OR c.joined <= %(date_to)s::date)) AS working_days
+                   FROM sellers s ORDER BY s.id""",
+                {'date_from': date_from, 'date_to': date_to},
             )
             rows = cur.fetchall()
             return _resp(200, {'sellers': [_seller_dict(r) for r in rows]})
