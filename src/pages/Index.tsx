@@ -1088,7 +1088,7 @@ function Profile({ email, logout, stats, count, sellerId, isAdmin }: {
       <div className="bg-card border border-border rounded-lg p-5 space-y-3">
         <div className="font-medium">Материалы для работы</div>
         <p className="text-sm text-muted-foreground">Инструкция: как объяснять покупателям программу лояльности</p>
-        <a href="/loyalty-program-guide.docx" download>
+        <a href="https://cdn.poehali.dev/projects/947ad8b7-33ec-4a05-ad47-a61ac91d1c24/bucket/files/loyalty-program-guide.docx" download target="_blank" rel="noopener noreferrer">
           <Button variant="outline">
             <Icon name="Download" size={16} className="mr-2" /> Скачать инструкцию (Word)
           </Button>
