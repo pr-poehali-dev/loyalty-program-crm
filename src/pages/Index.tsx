@@ -1085,6 +1085,15 @@ function Profile({ email, logout, stats, count, sellerId, isAdmin }: {
           </div>
         ))}
       </div>
+      <div className="bg-card border border-border rounded-lg p-5 space-y-3">
+        <div className="font-medium">Материалы для работы</div>
+        <p className="text-sm text-muted-foreground">Инструкция: как объяснять покупателям программу лояльности</p>
+        <a href="/loyalty-program-guide.docx" download>
+          <Button variant="outline">
+            <Icon name="Download" size={16} className="mr-2" /> Скачать инструкцию (Word)
+          </Button>
+        </a>
+      </div>
       <div className="bg-card border border-border rounded-lg p-5 space-y-4">
         <div className="font-medium">Смена пароля</div>
         <div className="space-y-1.5">
