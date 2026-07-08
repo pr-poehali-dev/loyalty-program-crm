@@ -627,9 +627,14 @@ function Stat({ icon, label, value, accent }: { icon: string; label: string; val
 function Customers({ customers, stats, setAddOpen, openDetail }: {
   customers: Customer[]; stats: Stats; setAddOpen: (v: boolean) => void; openDetail: (id: number) => void;
 }) {
+  const [search, setSearch] = useState('');
   const refName = (id: number | null) =>
     id ? customers.find((c: Customer) => c.id === id)?.name.split(' ').slice(0, 2).join(' ') : '—';
   const invitersCount = customers.filter((c) => c.refId === null).length;
+  const digitsSearch = search.replace(/\D/g, '');
+  const filtered = digitsSearch
+    ? customers.filter((c) => c.phone.replace(/\D/g, '').includes(digitsSearch))
+    : customers;
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -647,6 +652,16 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
         <Stat icon="Crown" label="Без пригласившего" value={invitersCount} />
         <Stat icon="Network" label="По приглашению" value={customers.length - invitersCount} />
         <Stat icon="Coins" label="Временных баллов" value={stats.totalTemp.toFixed(1)} accent />
+      </div>
+
+      <div className="relative max-w-sm">
+        <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Поиск по номеру телефона"
+          className="pl-9"
+        />
       </div>
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -667,7 +682,10 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
               </tr>
             </thead>
             <tbody>
-              {customers.map((c: Customer) => (
+              {filtered.length === 0 && (
+                <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
+              )}
+              {filtered.map((c: Customer) => (
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">{c.name}<div className="text-xs text-muted-foreground font-normal">с {c.joined}</div></td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
@@ -894,6 +912,11 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
 }
 
 function AllCustomers({ customers, openDetail }: { customers: Customer[]; openDetail: (id: number) => void }) {
+  const [search, setSearch] = useState('');
+  const digitsSearch = search.replace(/\D/g, '');
+  const filtered = digitsSearch
+    ? customers.filter((c) => c.phone.replace(/\D/g, '').includes(digitsSearch))
+    : customers;
   return (
     <div className="space-y-6">
       <div>
@@ -903,6 +926,15 @@ function AllCustomers({ customers, openDetail }: { customers: Customer[]; openDe
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat icon="Users" label="Всего покупателей" value={customers.length} />
         <Stat icon="Coins" label="Временных баллов" value={customers.reduce((s, c) => s + c.tempPoints, 0).toFixed(1)} accent />
+      </div>
+      <div className="relative max-w-sm">
+        <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Поиск по номеру телефона"
+          className="pl-9"
+        />
       </div>
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -919,7 +951,10 @@ function AllCustomers({ customers, openDetail }: { customers: Customer[]; openDe
               </tr>
             </thead>
             <tbody>
-              {customers.map((c) => (
+              {filtered.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
+              )}
+              {filtered.map((c) => (
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">{c.name}<div className="text-xs text-muted-foreground font-normal">с {c.joined}</div></td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
