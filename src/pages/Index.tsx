@@ -804,10 +804,27 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
   const avgPerShift = totalDays > 0 ? totalCustomers / totalDays : 0;
   const hasFilter = !!dateFrom || !!dateTo;
 
+  const [sortKey, setSortKey] = useState<'avg' | 'customers'>('avg');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const toggleSort = (key: 'avg' | 'customers') => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
   const avgOf = (s: Seller) => (s.workingDays > 0 ? s.customersCount / s.workingDays : -1);
-  const rankedSellers = [...sellersOnly].sort((a, b) => avgOf(b) - avgOf(a));
+  const valueOf = (s: Seller) => (sortKey === 'avg' ? avgOf(s) : s.customersCount);
+  const rankedSellers = [...sellersOnly].sort((a, b) =>
+    sortDir === 'desc' ? valueOf(b) - valueOf(a) : valueOf(a) - valueOf(b),
+  );
   const adminRows = sellers.filter((s) => s.role === 'admin');
   const sortedSellers = [...rankedSellers, ...adminRows];
+  const sortIcon = (key: 'avg' | 'customers') =>
+    sortKey === key ? (sortDir === 'desc' ? 'ChevronDown' : 'ChevronUp') : 'ChevronsUpDown';
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -854,9 +871,23 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
                 <th className="px-4 py-3 font-medium">Имя</th>
                 {isAdmin && <th className="px-4 py-3 font-medium">Email (логин)</th>}
                 <th className="px-4 py-3 font-medium">Статус</th>
-                <th className="px-4 py-3 font-medium text-right">Покупателей</th>
+                <th
+                  className="px-4 py-3 font-medium text-right cursor-pointer select-none hover:text-foreground"
+                  onClick={() => toggleSort('customers')}
+                >
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Покупателей <Icon name={sortIcon('customers')} size={13} />
+                  </span>
+                </th>
                 <th className="px-4 py-3 font-medium text-right">Смен отработано</th>
-                <th className="px-4 py-3 font-medium text-right">Ср. покупателей/смену</th>
+                <th
+                  className="px-4 py-3 font-medium text-right cursor-pointer select-none hover:text-foreground"
+                  onClick={() => toggleSort('avg')}
+                >
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Ср. покупателей/смену <Icon name={sortIcon('avg')} size={13} />
+                  </span>
+                </th>
                 {isAdmin && <th className="px-4 py-3 font-medium text-right">Действия</th>}
               </tr>
             </thead>
