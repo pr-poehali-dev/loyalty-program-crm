@@ -570,10 +570,25 @@ def handler(event: dict, context) -> dict:
                    WHERE c.birth IS NOT NULL ORDER BY c.id"""
             )
             rows = cur.fetchall()
+            today = dt.date.today()
             result = []
+            auto_sent = 0
             for r in rows:
                 info = _birthday_window(r)
-                if info['daysUntilBirthday'] is not None and (info['daysUntilBirthday'] <= BIRTHDAY_NOTIFY_DAYS_BEFORE or info['bonusActive']):
+                if info['daysUntilBirthday'] is None:
+                    continue
+                # Автоматическая отправка SMS за BIRTHDAY_NOTIFY_DAYS_BEFORE дней до ДР при заходе в систему
+                if info['shouldNotify']:
+                    text = f"{r['name'].split(' ')[0]}, с наступающим Днём рождения! Дарим скидку {BIRTHDAY_BONUS_AMOUNT} ₽ на покупку в течение {BIRTHDAY_BONUS_WINDOW_DAYS} дней."
+                    if _send_sms(r['phone'], text):
+                        cur.execute(
+                            "UPDATE customers SET birthday_bonus_notify_date = %s WHERE id = %s RETURNING *",
+                            (today, r['id']),
+                        )
+                        r = cur.fetchone()
+                        info = _birthday_window(r)
+                        auto_sent += 1
+                if info['daysUntilBirthday'] <= BIRTHDAY_NOTIFY_DAYS_BEFORE or info['bonusActive']:
                     item = _customer_dict(r)
                     item.update({
                         'daysUntilBirthday': info['daysUntilBirthday'],
@@ -582,7 +597,8 @@ def handler(event: dict, context) -> dict:
                         'bonusExpires': info['bonusExpires'],
                     })
                     result.append(item)
-            return _resp(200, {'customers': result, 'bonusAmount': BIRTHDAY_BONUS_AMOUNT})
+            result.sort(key=lambda x: x['daysUntilBirthday'])
+            return _resp(200, {'customers': result, 'bonusAmount': BIRTHDAY_BONUS_AMOUNT, 'autoSent': auto_sent})
 
         if method == 'POST' and action == 'send_birthday_sms':
             cid = int(body.get('id'))

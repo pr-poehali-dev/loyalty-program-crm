@@ -171,6 +171,9 @@ export default function Index() {
       if (res.ok) {
         setBirthdayCustomers(data.customers || []);
         setBirthdayBonusAmount(data.bonusAmount ?? 200);
+        if (data.autoSent > 0) {
+          toast.success(`Автоматически отправлено SMS: ${data.autoSent}`, { icon: '🎂' });
+        }
       }
     } catch {
       toast.error('Не удалось загрузить дни рождения');
