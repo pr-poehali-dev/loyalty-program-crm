@@ -505,7 +505,7 @@ export default function Index() {
             />
           )}
           {isAdmin && activeTab === 'allCustomers' && (
-            <AllCustomers customers={allCustomers} openDetail={openDetail} />
+            <AllCustomers customers={allCustomers} openDetail={openDetail} onDelete={deleteCustomer} />
           )}
           {activeTab === 'birthdays' && (
             <Birthdays
@@ -970,7 +970,7 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
   );
 }
 
-function AllCustomers({ customers, openDetail }: { customers: Customer[]; openDetail: (id: number) => void }) {
+function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer[]; openDetail: (id: number) => void; onDelete: (id: number) => void }) {
   const [search, setSearch] = useState('');
   const digitsSearch = search.replace(/\D/g, '');
   const filtered = digitsSearch
@@ -1007,11 +1007,12 @@ function AllCustomers({ customers, openDetail }: { customers: Customer[]; openDe
                 <th className="px-4 py-3 font-medium text-right">Объём, ₽</th>
                 <th className="px-4 py-3 font-medium text-right">Врем. баллы</th>
                 <th className="px-4 py-3 font-medium text-right">Пожизн.</th>
+                <th className="px-4 py-3 font-medium text-right"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
               )}
               {filtered.map((c) => (
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
@@ -1022,6 +1023,16 @@ function AllCustomers({ customers, openDetail }: { customers: Customer[]; openDe
                   <td className="px-4 py-3 text-right tabular">{c.purchaseAmount ? c.purchaseAmount.toLocaleString('ru') : '—'}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold">{c.tempPoints.toFixed(1)}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold text-accent">{c.lifePoints.toFixed(1)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={(e) => { e.stopPropagation(); onDelete(c.id); }}
+                    >
+                      <Icon name="Trash2" size={14} />
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
