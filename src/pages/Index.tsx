@@ -1307,7 +1307,7 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, on
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-display">Карточка покупателя</DialogTitle>
         </DialogHeader>
@@ -1402,22 +1402,24 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, on
                     <Icon name="CheckCircle2" size={16} className="mr-2" /> Завершить регистрацию
                   </Button>
                 )}
-                {isAdmin && (
-                  <Button
-                    variant="destructive"
-                    disabled={busy}
-                    onClick={() => onDelete(detail.customer.id)}
-                    className="ml-auto"
-                  >
-                    <Icon name="Trash2" size={16} className="mr-2" /> Удалить
-                  </Button>
-                )}
               </div>
             )}
             {!canEdit && detail.customer.registrationCompleted && (
               <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                 <Icon name="Lock" size={13} /> Регистрация завершена — изменения доступны только администратору
               </p>
+            )}
+            {isAdmin && (
+              <div className="pt-3 border-t border-border">
+                <Button
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => onDelete(detail.customer.id)}
+                  className="w-full"
+                >
+                  <Icon name="Trash2" size={16} className="mr-2" /> Удалить покупателя
+                </Button>
+              </div>
             )}
           </div>
         )}
