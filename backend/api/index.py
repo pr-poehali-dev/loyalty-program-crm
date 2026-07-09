@@ -291,6 +291,20 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {'error': 'Продавец не найден'})
             return _resp(200, {'ok': True})
 
+        if method == 'DELETE' and action == 'delete_customer':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            cid = params.get('id')
+            if not cid:
+                return _resp(400, {'error': 'Не указан id покупателя'})
+            cid = int(cid)
+            cur.execute("SELECT id FROM customers WHERE id = %s", (cid,))
+            if not cur.fetchone():
+                return _resp(404, {'error': 'Покупатель не найден'})
+            cur.execute("UPDATE customers SET ref_id = NULL WHERE ref_id = %s", (cid,))
+            cur.execute("DELETE FROM customers WHERE id = %s", (cid,))
+            return _resp(200, {'ok': True})
+
         if method == 'GET' and action == 'all_customers':
             cur.execute(
                 """SELECT c.*, s.name AS seller_name, s.email AS seller_email,

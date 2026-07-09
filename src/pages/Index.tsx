@@ -336,6 +336,33 @@ export default function Index() {
     }
   };
 
+  const deleteCustomer = async (id: number) => {
+    if (!window.confirm('Удалить покупателя без возможности восстановления?')) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}?action=delete_customer&id=${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Seller-Id': String(sellerId) },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось удалить покупателя');
+        return;
+      }
+      toast.success('Покупатель удалён');
+      setDetailId(null);
+      setDetail(null);
+      if (sellerId !== null) {
+        if (isAdmin) await loadAllCustomers(sellerId);
+        else await loadCustomers(sellerId);
+      }
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const completeRegistration = async (id: number) => {
     try {
       const res = await fetch(`${API_URL}?action=complete_registration`, {
@@ -504,6 +531,7 @@ export default function Index() {
         onEdit={(c) => setEditCustomer(c)}
         onComplete={completeRegistration}
         onRedeemPoints={redeemPoints}
+        onDelete={deleteCustomer}
         busy={busy}
       />
       <EditCustomerDialog
@@ -1249,13 +1277,14 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, customers,
   );
 }
 
-function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, onEdit, onComplete, onRedeemPoints, busy }: {
+function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, onEdit, onComplete, onRedeemPoints, onDelete, busy }: {
   open: boolean; onOpenChange: (v: boolean) => void; loading: boolean;
   detail: { customer: Customer; invited: Customer[] } | null;
   isAdmin: boolean;
   onEdit: (c: Customer) => void;
   onComplete: (id: number) => void;
   onRedeemPoints: (id: number, amount: number) => void;
+  onDelete: (id: number) => void;
   busy: boolean;
 }) {
   const canEdit = !!detail && (isAdmin || !detail.customer.registrationCompleted);
@@ -1360,6 +1389,16 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, on
                 {!detail.customer.registrationCompleted && (
                   <Button onClick={() => onComplete(detail.customer.id)}>
                     <Icon name="CheckCircle2" size={16} className="mr-2" /> Завершить регистрацию
+                  </Button>
+                )}
+                {isAdmin && (
+                  <Button
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => onDelete(detail.customer.id)}
+                    className="ml-auto"
+                  >
+                    <Icon name="Trash2" size={16} className="mr-2" /> Удалить
                   </Button>
                 )}
               </div>
