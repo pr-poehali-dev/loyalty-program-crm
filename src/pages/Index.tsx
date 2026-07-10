@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import {
@@ -42,6 +43,7 @@ type Customer = {
   pointsRedeemedAmount: number;
   birthdayBonusNotifyDate?: string | null;
   birthdayBonusUsedYear?: number | null;
+  notes?: string;
 };
 
 type BirthdayCustomer = Customer & {
@@ -92,12 +94,12 @@ type NavKey = (typeof sellerNav)[number]['key'] | (typeof adminNav)[number]['key
 type Stats = { totalTemp: number; totalLife: number; totalVouchers: number };
 type Form = {
   name: string; phone: string; birth: string; refId: string;
-  productName: string; purchaseAmount: string; purchaseDate: string;
+  productName: string; purchaseAmount: string; purchaseDate: string; notes: string;
 };
 
 const EMPTY_FORM: Form = {
   name: '', phone: '', birth: '', refId: '',
-  productName: '', purchaseAmount: '', purchaseDate: '',
+  productName: '', purchaseAmount: '', purchaseDate: '', notes: '',
 };
 
 export default function Index() {
@@ -812,11 +814,12 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
                 <th className="px-4 py-3 font-medium text-right">Покупки</th>
                 <th className="px-4 py-3 font-medium text-right">Врем. баллы</th>
                 <th className="px-4 py-3 font-medium text-right">Пожизн.</th>
+                <th className="px-4 py-3 font-medium">Примечание</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
+                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
               )}
               {filtered.map((c: Customer) => (
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
@@ -830,6 +833,7 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
                   <td className="px-4 py-3 text-right tabular">{c.purchases}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold">{c.tempPoints.toFixed(1)}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold text-accent">{c.lifePoints.toFixed(1)}</td>
+                  <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate" title={c.notes || ''}>{c.notes || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1197,12 +1201,13 @@ function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer
                 <th className="px-4 py-3 font-medium text-right">Объём, ₽</th>
                 <th className="px-4 py-3 font-medium text-right">Врем. баллы</th>
                 <th className="px-4 py-3 font-medium text-right">Пожизн.</th>
+                <th className="px-4 py-3 font-medium">Примечание</th>
                 <th className="px-4 py-3 font-medium text-right"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
               )}
               {filtered.map((c) => (
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
@@ -1213,6 +1218,7 @@ function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer
                   <td className="px-4 py-3 text-right tabular">{c.purchaseAmount ? c.purchaseAmount.toLocaleString('ru') : '—'}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold">{c.tempPoints.toFixed(1)}</td>
                   <td className="px-4 py-3 text-right tabular font-semibold text-accent">{c.lifePoints.toFixed(1)}</td>
+                  <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate" title={c.notes || ''}>{c.notes || '—'}</td>
                   <td className="px-4 py-3 text-right">
                     <Button
                       size="sm"
@@ -1571,6 +1577,10 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, customers,
               <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
             </div>
           </div>
+          <div className="space-y-1.5">
+            <Label>Примечание</Label>
+            <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Заметка о покупателе" rows={2} />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setAddOpen(false)} disabled={busy}>Отмена</Button>
@@ -1630,6 +1640,13 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, on
               <Stat icon="Coins" label="Временные баллы" value={detail.customer.tempPoints.toFixed(1)} />
               <Stat icon="Infinity" label="Пожизненные баллы" value={detail.customer.lifePoints.toFixed(1)} />
             </div>
+
+            {detail.customer.notes && (
+              <div className="bg-card border border-border rounded-lg p-4">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-1.5">Примечание</div>
+                <p className="text-sm whitespace-pre-wrap">{detail.customer.notes}</p>
+              </div>
+            )}
 
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-border bg-secondary/70 text-xs uppercase tracking-wide text-muted-foreground font-medium">
@@ -1725,7 +1742,7 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, on
 
 type EditForm = {
   name: string; phone: string; birth: string; refId: string;
-  productName: string; purchaseAmount: string; purchaseDate: string;
+  productName: string; purchaseAmount: string; purchaseDate: string; notes: string;
 };
 
 function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
@@ -1736,7 +1753,7 @@ function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
   busy: boolean;
 }) {
   const [form, setForm] = useState<EditForm>({
-    name: '', phone: '', birth: '', refId: '', productName: '', purchaseAmount: '', purchaseDate: '',
+    name: '', phone: '', birth: '', refId: '', productName: '', purchaseAmount: '', purchaseDate: '', notes: '',
   });
 
   useEffect(() => {
@@ -1749,6 +1766,7 @@ function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
         productName: customer.productName || '',
         purchaseAmount: customer.purchaseAmount ? String(customer.purchaseAmount) : '',
         purchaseDate: customer.purchaseDate || '',
+        notes: customer.notes || '',
       });
     }
   }, [customer]);
@@ -1769,6 +1787,7 @@ function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
       productName: form.productName,
       purchaseAmount: form.purchaseAmount,
       purchaseDate: form.purchaseDate,
+      notes: form.notes,
     });
   };
 
@@ -1816,6 +1835,10 @@ function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
               <Label>Дата покупки</Label>
               <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Примечание</Label>
+            <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Заметка о покупателе" rows={2} />
           </div>
         </div>
         <DialogFooter>

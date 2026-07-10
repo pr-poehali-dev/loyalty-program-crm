@@ -69,6 +69,7 @@ def _customer_dict(row) -> dict:
         'pointsRedeemedAmount': float(row['points_redeemed_amount']) if 'points_redeemed_amount' in keys else 0,
         'birthdayBonusNotifyDate': str(row['birthday_bonus_notify_date']) if row.get('birthday_bonus_notify_date') else None,
         'birthdayBonusUsedYear': row['birthday_bonus_used_year'] if 'birthday_bonus_used_year' in keys else None,
+        'notes': row['notes'] if 'notes' in keys and row['notes'] else '',
     }
 
 
@@ -436,6 +437,7 @@ def handler(event: dict, context) -> dict:
             else:
                 purchase_amount = float(purchase_amount) if purchase_amount not in (None, '') else None
             purchase_date = body.get('purchaseDate') if body.get('purchaseDate') else (str(row['purchase_date']) if row['purchase_date'] else None)
+            notes = body.get('notes') if 'notes' in body else row['notes']
 
             new_ref_id = body.get('refId') if 'refId' in body else row['ref_id']
             new_ref_id = int(new_ref_id) if new_ref_id else None
@@ -498,9 +500,9 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 """UPDATE customers SET name = %s, phone = %s, birth = %s, ref_id = %s,
                           product_name = %s, purchase_amount = %s, purchase_date = COALESCE(%s, purchase_date),
-                          earned_points_given = %s
+                          earned_points_given = %s, notes = %s
                    WHERE id = %s RETURNING *""",
-                (name, phone, birth, new_ref_id, product_name, purchase_amount, purchase_date, new_given, cid),
+                (name, phone, birth, new_ref_id, product_name, purchase_amount, purchase_date, new_given, notes, cid),
             )
             updated = cur.fetchone()
             return _resp(200, {'customer': _customer_dict(updated), 'notify': notify, 'earnedPoints': new_given or None})
@@ -527,6 +529,7 @@ def handler(event: dict, context) -> dict:
             purchase_amount = body.get('purchaseAmount')
             purchase_amount = float(purchase_amount) if purchase_amount not in (None, '') else None
             purchase_date = body.get('purchaseDate') or None
+            notes = (body.get('notes') or '').strip() or None
 
             if ref_id:
                 cur.execute("SELECT id FROM customers WHERE id = %s", (ref_id,))
@@ -555,9 +558,9 @@ def handler(event: dict, context) -> dict:
             vouchers = VOUCHERS_PER_BATCH
             cur.execute(
                 """INSERT INTO customers
-                   (seller_id, name, phone, birth, type, ref_id, vouchers, product_name, purchase_amount, purchase_date)
-                   VALUES (%s, %s, %s, %s, 'customer', %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE)) RETURNING *""",
-                (seller_id, name, phone, birth, ref_id, vouchers, product_name, purchase_amount, purchase_date),
+                   (seller_id, name, phone, birth, type, ref_id, vouchers, product_name, purchase_amount, purchase_date, notes)
+                   VALUES (%s, %s, %s, %s, 'customer', %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s) RETURNING *""",
+                (seller_id, name, phone, birth, ref_id, vouchers, product_name, purchase_amount, purchase_date, notes),
             )
             new_row = cur.fetchone()
 
