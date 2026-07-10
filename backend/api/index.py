@@ -443,7 +443,7 @@ def handler(event: dict, context) -> dict:
             updated = cur.fetchone()
             return _resp(200, {'customer': _customer_dict(updated), 'notify': notify, 'earnedPoints': new_given or None})
 
-        if method == 'GET':
+        if method == 'GET' and action == '':
             cur.execute(
                 """SELECT c.*, s.name AS seller_name, s.email AS seller_email,
                           (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
