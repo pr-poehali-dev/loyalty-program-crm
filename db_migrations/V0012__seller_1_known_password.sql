@@ -1,0 +1,1 @@
+UPDATE sellers SET password_plain = 'W5yfxe7S' WHERE id = 1;

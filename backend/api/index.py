@@ -133,9 +133,9 @@ def _birthday_window(customer_row) -> dict:
     }
 
 
-def _seller_dict(row) -> dict:
+def _seller_dict(row, show_password: bool = False) -> dict:
     keys = row.keys()
-    return {
+    d = {
         'id': row['id'],
         'phone': row['phone'],
         'name': row['name'],
@@ -147,6 +147,9 @@ def _seller_dict(row) -> dict:
         'customersCount': row['customers_count'] if 'customers_count' in keys else 0,
         'workingDays': row['working_days'] if 'working_days' in keys else 0,
     }
+    if show_password:
+        d['password'] = row['password_plain'] if 'password_plain' in keys else None
+    return d
 
 
 def _gen_password() -> str:
@@ -215,7 +218,10 @@ def handler(event: dict, context) -> dict:
             ok = seller['password_hash'] == old_password or seller['password_hash'] == _hash(old_password)
             if not ok:
                 return _resp(401, {'error': 'Текущий пароль указан неверно'})
-            cur.execute("UPDATE sellers SET password_hash = %s WHERE id = %s", (_hash(new_password), seller_id))
+            cur.execute(
+                "UPDATE sellers SET password_hash = %s, password_plain = %s WHERE id = %s",
+                (_hash(new_password), new_password, seller_id),
+            )
             return _resp(200, {'ok': True})
 
         # ---- Админские действия ----
@@ -238,9 +244,9 @@ def handler(event: dict, context) -> dict:
             password = _gen_password()
             placeholder_email = f"seller_{secrets.token_hex(8)}@noemail.local"
             cur.execute(
-                """INSERT INTO sellers (email, phone, password_hash, name, role, status, shop_id, activated_at)
-                   VALUES (%s, %s, %s, %s, 'seller', 'active', %s, now()) RETURNING id""",
-                (placeholder_email, phone, _hash(password), name, shop_id),
+                """INSERT INTO sellers (email, phone, password_hash, password_plain, name, role, status, shop_id, activated_at)
+                   VALUES (%s, %s, %s, %s, %s, 'seller', 'active', %s, now()) RETURNING id""",
+                (placeholder_email, phone, _hash(password), password, name, shop_id),
             )
             new_id = cur.fetchone()['id']
             return _resp(200, {'id': new_id, 'phone': phone, 'name': name, 'password': password})
@@ -254,7 +260,10 @@ def handler(event: dict, context) -> dict:
             if not target:
                 return _resp(404, {'error': 'Продавец не найден'})
             password = _gen_password()
-            cur.execute("UPDATE sellers SET password_hash = %s WHERE id = %s", (_hash(password), target_id))
+            cur.execute(
+                "UPDATE sellers SET password_hash = %s, password_plain = %s WHERE id = %s",
+                (_hash(password), password, target_id),
+            )
             return _resp(200, {'id': target['id'], 'phone': target['phone'], 'name': target['name'], 'password': password})
 
         if method == 'GET' and action == 'list_sellers':
@@ -272,7 +281,7 @@ def handler(event: dict, context) -> dict:
                 {'date_from': date_from, 'date_to': date_to},
             )
             rows = cur.fetchall()
-            return _resp(200, {'sellers': [_seller_dict(r) for r in rows]})
+            return _resp(200, {'sellers': [_seller_dict(r, show_password=is_admin) for r in rows]})
 
         if method == 'GET' and action == 'list_shops':
             cur.execute(

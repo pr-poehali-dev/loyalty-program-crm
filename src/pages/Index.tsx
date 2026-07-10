@@ -62,6 +62,7 @@ type Seller = {
   activatedAt: string | null;
   customersCount: number;
   workingDays: number;
+  password?: string | null;
 };
 
 type Shop = {
@@ -1014,6 +1015,7 @@ function Sellers({ sellers, setRegisterOpen, setSellerStatus, resetSellerPasswor
                 <th className="px-4 py-3 font-medium text-right">#</th>
                 <th className="px-4 py-3 font-medium">Имя</th>
                 {isAdmin && <th className="px-4 py-3 font-medium">Телефон (логин)</th>}
+                {isAdmin && <th className="px-4 py-3 font-medium">Пароль</th>}
                 {isAdmin && <th className="px-4 py-3 font-medium">Магазин</th>}
                 <th className="px-4 py-3 font-medium">Статус</th>
                 <th
@@ -1049,6 +1051,25 @@ function Sellers({ sellers, setRegisterOpen, setSellerStatus, resetSellerPasswor
                     {s.name}
                   </td>
                   {isAdmin && <td className="px-4 py-3 tabular text-muted-foreground">{s.phone}</td>}
+                  {isAdmin && (
+                    <td className="px-4 py-3 tabular">
+                      {s.password ? (
+                        <button
+                          className="text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+                          onClick={() => {
+                            navigator.clipboard.writeText(s.password || '');
+                            toast.success('Пароль скопирован');
+                          }}
+                          title="Скопировать пароль"
+                        >
+                          {s.password}
+                          <Icon name="Copy" size={12} />
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  )}
                   {isAdmin && <td className="px-4 py-3 text-muted-foreground">{s.shopName || '—'}</td>}
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusClass[s.status]}`}>
