@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 
@@ -104,11 +105,11 @@ export default function AcceptInvite() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">Придумайте пароль</Label>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+              <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">Повторите пароль</Label>
-              <Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+              <PasswordInput value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && submit()} />
             </div>
             <Button className="w-full" onClick={submit} disabled={busy}>
               <Icon name={busy ? 'Loader2' : 'CheckCircle'} size={16} className={`mr-2 ${busy ? 'animate-spin' : ''}`} />

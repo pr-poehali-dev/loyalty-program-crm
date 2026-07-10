@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -572,7 +573,7 @@ function Login({ email, setEmail, pass, setPass, login, busy }: {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Пароль</Label>
-            <Input value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" type="password" onKeyDown={(e) => e.key === 'Enter' && login()} />
+            <PasswordInput value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && login()} />
           </div>
           <Button className="w-full" onClick={login} disabled={busy}>
             <Icon name={busy ? 'Loader2' : 'LogIn'} size={16} className={`mr-2 ${busy ? 'animate-spin' : ''}`} />
@@ -1206,16 +1207,16 @@ function Profile({ email, logout, stats, count, sellerId, isAdmin }: {
         <div className="font-medium">Смена пароля</div>
         <div className="space-y-1.5">
           <Label className="text-xs uppercase tracking-wide text-muted-foreground">Текущий пароль</Label>
-          <Input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} placeholder="••••••••" />
+          <PasswordInput value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} placeholder="••••••••" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Новый пароль</Label>
-            <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" />
+            <PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Повторите пароль</Label>
-            <Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && changePassword()} />
+            <PasswordInput value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && changePassword()} />
           </div>
         </div>
         <Button onClick={changePassword} disabled={changing}>
