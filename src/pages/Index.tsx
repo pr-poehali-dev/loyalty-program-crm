@@ -251,6 +251,25 @@ export default function Index() {
     }
   };
 
+  const deleteSeller = async (id: number) => {
+    if (!window.confirm('Удалить продавца? Его покупатели будут переданы администратору.')) return;
+    try {
+      const res = await fetch(`${API_URL}?action=delete_seller&id=${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Seller-Id': String(sellerId) },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось удалить продавца');
+        return;
+      }
+      toast.success('Продавец удалён, покупатели переданы администратору');
+      await loadSellers(sellerId as number, sellerDateFrom, sellerDateTo);
+    } catch {
+      toast.error('Сервер недоступен');
+    }
+  };
+
   const openDetail = async (id: number) => {
     setDetailId(id);
     setDetail(null);
@@ -521,6 +540,7 @@ export default function Index() {
               setInviteOpen={setInviteOpen}
               setSellerStatus={setSellerStatus}
               resendInvite={resendInvite}
+              deleteSeller={deleteSeller}
               dateFrom={sellerDateFrom}
               dateTo={sellerDateTo}
               onDateFromChange={(v) => { setSellerDateFrom(v); loadSellers(sellerId as number, v, sellerDateTo); }}
@@ -839,9 +859,10 @@ function Vouchers({ customers, spendVoucher }: { customers: Customer[]; spendVou
   );
 }
 
-function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates, isAdmin }: {
+function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, deleteSeller, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates, isAdmin }: {
   sellers: Seller[]; setInviteOpen: (v: boolean) => void; setSellerStatus: (id: number, status: 'active' | 'blocked') => void;
   resendInvite: (id: number) => Promise<string | null>;
+  deleteSeller: (id: number) => void;
   dateFrom: string; dateTo: string;
   onDateFromChange: (v: string) => void; onDateToChange: (v: string) => void; onResetDates: () => void;
   isAdmin: boolean;
@@ -984,28 +1005,35 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, dateFr
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3 text-right">
-                      {s.role !== 'admin' && s.status === 'invited' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={resendBusyId === s.id}
-                          onClick={() => handleResend(s.id)}
-                        >
-                          <Icon name={resendBusyId === s.id ? 'Loader2' : 'RefreshCw'} size={14} className={`mr-1 ${resendBusyId === s.id ? 'animate-spin' : ''}`} />
-                          Отправить снова
-                        </Button>
-                      )}
-                      {s.role !== 'admin' && s.status !== 'invited' && (
-                        s.status === 'active' ? (
-                          <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'blocked')}>
-                            <Icon name="Ban" size={14} className="mr-1" /> Заблокировать
+                      <div className="inline-flex items-center gap-2">
+                        {s.role !== 'admin' && s.status === 'invited' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={resendBusyId === s.id}
+                            onClick={() => handleResend(s.id)}
+                          >
+                            <Icon name={resendBusyId === s.id ? 'Loader2' : 'RefreshCw'} size={14} className={`mr-1 ${resendBusyId === s.id ? 'animate-spin' : ''}`} />
+                            Отправить снова
                           </Button>
-                        ) : (
-                          <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'active')}>
-                            <Icon name="CheckCircle" size={14} className="mr-1" /> Разблокировать
+                        )}
+                        {s.role !== 'admin' && s.status !== 'invited' && (
+                          s.status === 'active' ? (
+                            <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'blocked')}>
+                              <Icon name="Ban" size={14} className="mr-1" /> Заблокировать
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'active')}>
+                              <Icon name="CheckCircle" size={14} className="mr-1" /> Разблокировать
+                            </Button>
+                          )
+                        )}
+                        {s.role !== 'admin' && (
+                          <Button size="sm" variant="outline" onClick={() => deleteSeller(s.id)}>
+                            <Icon name="Trash2" size={14} />
                           </Button>
-                        )
-                      )}
+                        )}
+                      </div>
                     </td>
                   )}
                 </tr>

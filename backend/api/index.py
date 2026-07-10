@@ -308,6 +308,27 @@ def handler(event: dict, context) -> dict:
                 return _resp(404, {'error': 'Продавец не найден'})
             return _resp(200, {'ok': True})
 
+        if method == 'DELETE' and action == 'delete_seller':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            target_id = int(params.get('id') or 0)
+            if not target_id:
+                return _resp(400, {'error': 'Не указан id продавца'})
+            if target_id == seller_id:
+                return _resp(400, {'error': 'Нельзя удалить самого себя'})
+            cur.execute("SELECT id, role FROM sellers WHERE id = %s", (target_id,))
+            target = cur.fetchone()
+            if not target:
+                return _resp(404, {'error': 'Продавец не найден'})
+            if target['role'] == 'admin':
+                return _resp(400, {'error': 'Нельзя удалить администратора'})
+            cur.execute(
+                "UPDATE customers SET seller_id = %s WHERE seller_id = %s",
+                (seller_id, target_id),
+            )
+            cur.execute("DELETE FROM sellers WHERE id = %s", (target_id,))
+            return _resp(200, {'ok': True})
+
         if method == 'DELETE' and action == 'delete_customer':
             if not is_admin:
                 return _resp(403, {'error': 'Доступно только администратору'})
