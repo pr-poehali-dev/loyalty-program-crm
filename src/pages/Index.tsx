@@ -212,6 +212,26 @@ export default function Index() {
     }
   };
 
+  const resendInvite = async (id: number) => {
+    try {
+      const res = await fetch(`${API_URL}?action=resend_invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось создать новое приглашение');
+        return null;
+      }
+      await loadSellers(sellerId as number, sellerDateFrom, sellerDateTo);
+      return data.inviteToken as string;
+    } catch {
+      toast.error('Сервер недоступен');
+      return null;
+    }
+  };
+
   const setSellerStatus = async (id: number, status: 'active' | 'blocked') => {
     try {
       const res = await fetch(`${API_URL}?action=set_seller_status`, {
@@ -500,6 +520,7 @@ export default function Index() {
               sellers={sellers}
               setInviteOpen={setInviteOpen}
               setSellerStatus={setSellerStatus}
+              resendInvite={resendInvite}
               dateFrom={sellerDateFrom}
               dateTo={sellerDateTo}
               onDateFromChange={(v) => { setSellerDateFrom(v); loadSellers(sellerId as number, v, sellerDateTo); }}
@@ -818,12 +839,24 @@ function Vouchers({ customers, spendVoucher }: { customers: Customer[]; spendVou
   );
 }
 
-function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates, isAdmin }: {
+function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates, isAdmin }: {
   sellers: Seller[]; setInviteOpen: (v: boolean) => void; setSellerStatus: (id: number, status: 'active' | 'blocked') => void;
+  resendInvite: (id: number) => Promise<string | null>;
   dateFrom: string; dateTo: string;
   onDateFromChange: (v: string) => void; onDateToChange: (v: string) => void; onResetDates: () => void;
   isAdmin: boolean;
 }) {
+  const [resendBusyId, setResendBusyId] = useState<number | null>(null);
+  const [resendLink, setResendLink] = useState('');
+
+  const handleResend = async (id: number) => {
+    setResendBusyId(id);
+    const token = await resendInvite(id);
+    setResendBusyId(null);
+    if (token) {
+      setResendLink(`${window.location.origin}/invite?token=${token}`);
+    }
+  };
   const statusLabel = { invited: 'Ждёт активации', active: 'Активен', blocked: 'Заблокирован' } as const;
   const statusClass = {
     invited: 'bg-secondary text-muted-foreground',
@@ -951,6 +984,17 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3 text-right">
+                      {s.role !== 'admin' && s.status === 'invited' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={resendBusyId === s.id}
+                          onClick={() => handleResend(s.id)}
+                        >
+                          <Icon name={resendBusyId === s.id ? 'Loader2' : 'RefreshCw'} size={14} className={`mr-1 ${resendBusyId === s.id ? 'animate-spin' : ''}`} />
+                          Отправить снова
+                        </Button>
+                      )}
                       {s.role !== 'admin' && s.status !== 'invited' && (
                         s.status === 'active' ? (
                           <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'blocked')}>
@@ -970,6 +1014,30 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, dateFrom, dateTo, on
           </table>
         </div>
       </div>
+
+      <Dialog open={!!resendLink} onOpenChange={(v) => !v && setResendLink('')}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Новая ссылка-приглашение</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">Отправьте эту ссылку продавцу — старая ссылка больше не действует.</p>
+          <div className="flex gap-2">
+            <Input value={resendLink} readOnly className="tabular text-xs" />
+            <Button
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText(resendLink);
+                toast.success('Ссылка скопирована');
+              }}
+            >
+              <Icon name="Copy" size={16} />
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResendLink('')}>Готово</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

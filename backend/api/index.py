@@ -257,6 +257,23 @@ def handler(event: dict, context) -> dict:
             new_id = cur.fetchone()['id']
             return _resp(200, {'id': new_id, 'email': email, 'name': name, 'inviteToken': token})
 
+        if method == 'POST' and action == 'resend_invite':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            target_id = int(body.get('id'))
+            cur.execute("SELECT id, email, name, status FROM sellers WHERE id = %s", (target_id,))
+            target = cur.fetchone()
+            if not target:
+                return _resp(404, {'error': 'Продавец не найден'})
+            if target['status'] != 'invited':
+                return _resp(400, {'error': 'Аккаунт уже активирован, повторное приглашение недоступно'})
+            token = secrets.token_urlsafe(24)
+            cur.execute(
+                "UPDATE sellers SET invite_token = %s, invited_at = now() WHERE id = %s",
+                (token, target_id),
+            )
+            return _resp(200, {'id': target['id'], 'email': target['email'], 'name': target['name'], 'inviteToken': token})
+
         if method == 'GET' and action == 'list_sellers':
             date_from = params.get('dateFrom') or None
             date_to = params.get('dateTo') or None
