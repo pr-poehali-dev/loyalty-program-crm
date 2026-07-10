@@ -63,7 +63,7 @@ def _customer_dict(row) -> dict:
         'totalEarnedPoints': float(row['total_earned_points']) if 'total_earned_points' in keys else 0,
         'invitedCount': row['invited_count'] if 'invited_count' in keys else 0,
         'sellerName': row['seller_name'] if 'seller_name' in keys else None,
-        'sellerEmail': row['seller_email'] if 'seller_email' in keys else None,
+        'sellerPhone': row['seller_phone'] if 'seller_phone' in keys else None,
         'registrationCompleted': row['registration_completed'] if 'registration_completed' in keys else False,
         'pointsRedeemed': row['points_redeemed'] if 'points_redeemed' in keys else False,
         'pointsRedeemedAmount': float(row['points_redeemed_amount']) if 'points_redeemed_amount' in keys else 0,
@@ -137,15 +137,28 @@ def _seller_dict(row) -> dict:
     keys = row.keys()
     return {
         'id': row['id'],
-        'email': row['email'],
+        'phone': row['phone'],
         'name': row['name'],
         'role': row['role'],
         'status': row['status'],
-        'invitedAt': str(row['invited_at']) if row.get('invited_at') else None,
+        'shopId': row['shop_id'] if 'shop_id' in keys else None,
+        'shopName': row['shop_name'] if 'shop_name' in keys else None,
         'activatedAt': str(row['activated_at']) if row.get('activated_at') else None,
         'customersCount': row['customers_count'] if 'customers_count' in keys else 0,
         'workingDays': row['working_days'] if 'working_days' in keys else 0,
     }
+
+
+def _gen_password() -> str:
+    alphabet = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    return ''.join(secrets.choice(alphabet) for _ in range(8))
+
+
+def _norm_phone(phone: str) -> str:
+    digits = ''.join(ch for ch in (phone or '') if ch.isdigit())
+    if len(digits) == 11 and digits.startswith('8'):
+        digits = '7' + digits[1:]
+    return '+' + digits if digits else ''
 
 
 def handler(event: dict, context) -> dict:
@@ -167,49 +180,18 @@ def handler(event: dict, context) -> dict:
         body = json.loads(event.get('body') or '{}')
 
         if method == 'POST' and action == 'login':
-            email = (body.get('email') or '').strip().lower()
+            phone = _norm_phone(body.get('phone') or '')
             password = body.get('password') or ''
-            cur.execute("SELECT id, email, name, password_hash, role, status FROM sellers WHERE email = %s", (email,))
+            cur.execute("SELECT id, phone, name, password_hash, role, status FROM sellers WHERE phone = %s", (phone,))
             seller = cur.fetchone()
             if not seller:
                 return _resp(401, {'error': 'Продавец не найден'})
-            if seller['status'] == 'invited':
-                return _resp(403, {'error': 'Учётная запись не активирована. Перейдите по ссылке-приглашению из письма'})
             if seller['status'] == 'blocked':
                 return _resp(403, {'error': 'Учётная запись заблокирована'})
             ok = seller['password_hash'] == password or seller['password_hash'] == _hash(password)
             if not ok:
                 return _resp(401, {'error': 'Неверный пароль'})
-            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name'], 'role': seller['role']})
-
-        if method == 'GET' and action == 'invite_info':
-            token = params.get('token') or ''
-            cur.execute("SELECT email, name, status FROM sellers WHERE invite_token = %s", (token,))
-            inv = cur.fetchone()
-            if not inv:
-                return _resp(404, {'error': 'Приглашение не найдено'})
-            if inv['status'] != 'invited':
-                return _resp(400, {'error': 'Приглашение уже использовано'})
-            return _resp(200, {'email': inv['email'], 'name': inv['name']})
-
-        if method == 'POST' and action == 'accept_invite':
-            token = body.get('token') or ''
-            password = body.get('password') or ''
-            if len(password) < 3:
-                return _resp(400, {'error': 'Пароль слишком короткий'})
-            cur.execute("SELECT id, status FROM sellers WHERE invite_token = %s", (token,))
-            inv = cur.fetchone()
-            if not inv:
-                return _resp(404, {'error': 'Приглашение не найдено'})
-            if inv['status'] != 'invited':
-                return _resp(400, {'error': 'Приглашение уже использовано'})
-            cur.execute(
-                """UPDATE sellers SET password_hash = %s, status = 'active', invite_token = NULL, activated_at = now()
-                   WHERE id = %s RETURNING id, email, name, role""",
-                (_hash(password), inv['id']),
-            )
-            seller = cur.fetchone()
-            return _resp(200, {'id': seller['id'], 'email': seller['email'], 'name': seller['name'], 'role': seller['role']})
+            return _resp(200, {'id': seller['id'], 'phone': seller['phone'], 'name': seller['name'], 'role': seller['role']})
 
         if not seller_id_header:
             return _resp(401, {'error': 'Требуется авторизация'})
@@ -237,59 +219,92 @@ def handler(event: dict, context) -> dict:
             return _resp(200, {'ok': True})
 
         # ---- Админские действия ----
-        if action == 'invite_seller':
+        if method == 'POST' and action == 'register_seller':
             if not is_admin:
                 return _resp(403, {'error': 'Доступно только администратору'})
-            email = (body.get('email') or '').strip().lower()
+            phone = _norm_phone(body.get('phone') or '')
             name = (body.get('name') or '').strip() or 'Продавец'
-            if '@' not in email:
-                return _resp(400, {'error': 'Некорректный email'})
-            cur.execute("SELECT id FROM sellers WHERE email = %s", (email,))
+            shop_id = body.get('shopId')
+            shop_id = int(shop_id) if shop_id else None
+            if len(phone) < 8:
+                return _resp(400, {'error': 'Некорректный номер телефона'})
+            cur.execute("SELECT id FROM sellers WHERE phone = %s", (phone,))
             if cur.fetchone():
-                return _resp(409, {'error': 'Продавец с таким email уже существует'})
-            token = secrets.token_urlsafe(24)
-            placeholder_hash = _hash(secrets.token_hex(16))
+                return _resp(409, {'error': 'Продавец с таким телефоном уже существует'})
+            if shop_id:
+                cur.execute("SELECT id FROM shops WHERE id = %s", (shop_id,))
+                if not cur.fetchone():
+                    return _resp(400, {'error': 'Магазин не найден'})
+            password = _gen_password()
+            placeholder_email = f"seller_{secrets.token_hex(8)}@noemail.local"
             cur.execute(
-                """INSERT INTO sellers (email, password_hash, name, role, status, invite_token, invited_at)
-                   VALUES (%s, %s, %s, 'seller', 'invited', %s, now()) RETURNING id""",
-                (email, placeholder_hash, name, token),
+                """INSERT INTO sellers (email, phone, password_hash, name, role, status, shop_id, activated_at)
+                   VALUES (%s, %s, %s, %s, 'seller', 'active', %s, now()) RETURNING id""",
+                (placeholder_email, phone, _hash(password), name, shop_id),
             )
             new_id = cur.fetchone()['id']
-            return _resp(200, {'id': new_id, 'email': email, 'name': name, 'inviteToken': token})
+            return _resp(200, {'id': new_id, 'phone': phone, 'name': name, 'password': password})
 
-        if method == 'POST' and action == 'resend_invite':
+        if method == 'POST' and action == 'reset_seller_password':
             if not is_admin:
                 return _resp(403, {'error': 'Доступно только администратору'})
             target_id = int(body.get('id'))
-            cur.execute("SELECT id, email, name, status FROM sellers WHERE id = %s", (target_id,))
+            cur.execute("SELECT id, phone, name FROM sellers WHERE id = %s", (target_id,))
             target = cur.fetchone()
             if not target:
                 return _resp(404, {'error': 'Продавец не найден'})
-            if target['status'] != 'invited':
-                return _resp(400, {'error': 'Аккаунт уже активирован, повторное приглашение недоступно'})
-            token = secrets.token_urlsafe(24)
-            cur.execute(
-                "UPDATE sellers SET invite_token = %s, invited_at = now() WHERE id = %s",
-                (token, target_id),
-            )
-            return _resp(200, {'id': target['id'], 'email': target['email'], 'name': target['name'], 'inviteToken': token})
+            password = _gen_password()
+            cur.execute("UPDATE sellers SET password_hash = %s WHERE id = %s", (_hash(password), target_id))
+            return _resp(200, {'id': target['id'], 'phone': target['phone'], 'name': target['name'], 'password': password})
 
         if method == 'GET' and action == 'list_sellers':
             date_from = params.get('dateFrom') or None
             date_to = params.get('dateTo') or None
             cur.execute(
-                """SELECT s.*,
+                """SELECT s.*, sh.name AS shop_name,
                           (SELECT COUNT(*) FROM customers c WHERE c.seller_id = s.id
                             AND (%(date_from)s::date IS NULL OR c.joined >= %(date_from)s::date)
                             AND (%(date_to)s::date IS NULL OR c.joined <= %(date_to)s::date)) AS customers_count,
                           (SELECT COUNT(DISTINCT c.joined) FROM customers c WHERE c.seller_id = s.id
                             AND (%(date_from)s::date IS NULL OR c.joined >= %(date_from)s::date)
                             AND (%(date_to)s::date IS NULL OR c.joined <= %(date_to)s::date)) AS working_days
-                   FROM sellers s ORDER BY s.id""",
+                   FROM sellers s LEFT JOIN shops sh ON sh.id = s.shop_id ORDER BY s.id""",
                 {'date_from': date_from, 'date_to': date_to},
             )
             rows = cur.fetchall()
             return _resp(200, {'sellers': [_seller_dict(r) for r in rows]})
+
+        if method == 'GET' and action == 'list_shops':
+            cur.execute(
+                """SELECT sh.id, sh.name,
+                          (SELECT COUNT(*) FROM sellers s WHERE s.shop_id = sh.id) AS sellers_count
+                   FROM shops sh ORDER BY sh.name"""
+            )
+            rows = cur.fetchall()
+            return _resp(200, {'shops': [{'id': r['id'], 'name': r['name'], 'sellersCount': r['sellers_count']} for r in rows]})
+
+        if method == 'POST' and action == 'add_shop':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            name = (body.get('name') or '').strip()
+            if not name:
+                return _resp(400, {'error': 'Укажите название магазина'})
+            cur.execute("INSERT INTO shops (name) VALUES (%s) RETURNING id", (name,))
+            new_id = cur.fetchone()['id']
+            return _resp(200, {'id': new_id, 'name': name})
+
+        if method == 'DELETE' and action == 'delete_shop':
+            if not is_admin:
+                return _resp(403, {'error': 'Доступно только администратору'})
+            sid = params.get('id')
+            if not sid:
+                return _resp(400, {'error': 'Не указан id магазина'})
+            sid = int(sid)
+            cur.execute("SELECT id FROM sellers WHERE shop_id = %s LIMIT 1", (sid,))
+            if cur.fetchone():
+                return _resp(400, {'error': 'Нельзя удалить магазин, к которому привязаны продавцы'})
+            cur.execute("DELETE FROM shops WHERE id = %s", (sid,))
+            return _resp(200, {'ok': True})
 
         if method == 'POST' and action == 'set_seller_status':
             if not is_admin:
@@ -345,7 +360,7 @@ def handler(event: dict, context) -> dict:
 
         if method == 'GET' and action == 'all_customers':
             cur.execute(
-                """SELECT c.*, s.name AS seller_name, s.email AS seller_email,
+                """SELECT c.*, s.name AS seller_name, s.phone AS seller_phone,
                           (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
                    FROM customers c JOIN sellers s ON s.id = c.seller_id
                    ORDER BY c.id"""
@@ -483,7 +498,7 @@ def handler(event: dict, context) -> dict:
 
         if method == 'GET' and action == '':
             cur.execute(
-                """SELECT c.*, s.name AS seller_name, s.email AS seller_email,
+                """SELECT c.*, s.name AS seller_name, s.phone AS seller_phone,
                           (SELECT COUNT(*) FROM customers r WHERE r.ref_id = c.id) AS invited_count
                    FROM customers c JOIN sellers s ON s.id = c.seller_id
                    ORDER BY c.id"""
@@ -603,7 +618,7 @@ def handler(event: dict, context) -> dict:
 
         if method == 'GET' and action == 'birthday_bonuses':
             cur.execute(
-                """SELECT c.*, s.name AS seller_name, s.email AS seller_email
+                """SELECT c.*, s.name AS seller_name, s.phone AS seller_phone
                    FROM customers c JOIN sellers s ON s.id = c.seller_id
                    WHERE c.birth IS NOT NULL ORDER BY c.id"""
             )

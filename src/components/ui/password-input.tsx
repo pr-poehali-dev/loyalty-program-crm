@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 
 const PasswordInput = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
   ({ className, ...props }, ref) => {
-    const [visible, setVisible] = useState(false)
+    const [visible, setVisible] = useState(true)
     return (
       <div className="relative">
         <Input

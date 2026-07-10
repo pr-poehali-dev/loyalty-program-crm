@@ -1,19 +1,17 @@
 {
   "tests": [
     {
-      "name": "Login demo seller",
-      "method": "POST",
-      "path": "/?action=login",
-      "body": {"email": "seller@company.ru", "password": "demo123"},
-      "expectedStatus": 200,
-      "expectedBody": {"email": "seller@company.ru"},
-      "bodyMatcher": "partial"
-    },
-    {
       "name": "Login wrong password",
       "method": "POST",
       "path": "/?action=login",
-      "body": {"email": "seller@company.ru", "password": "wrong"},
+      "body": {"phone": "+70000000001", "password": "wrong"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Login unknown phone",
+      "method": "POST",
+      "path": "/?action=login",
+      "body": {"phone": "+79990000000", "password": "any"},
       "expectedStatus": 401
     }
   ]

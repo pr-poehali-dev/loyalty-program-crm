@@ -36,7 +36,7 @@ type Customer = {
   totalEarnedPoints: number;
   invitedCount: number;
   sellerName?: string | null;
-  sellerEmail?: string | null;
+  sellerPhone?: string | null;
   registrationCompleted: boolean;
   pointsRedeemed: boolean;
   pointsRedeemedAmount: number;
@@ -53,14 +53,21 @@ type BirthdayCustomer = Customer & {
 
 type Seller = {
   id: number;
-  email: string;
+  phone: string;
   name: string;
   role: 'admin' | 'seller';
-  status: 'invited' | 'active' | 'blocked';
-  invitedAt: string | null;
+  status: 'active' | 'blocked';
+  shopId: number | null;
+  shopName: string | null;
   activatedAt: string | null;
   customersCount: number;
   workingDays: number;
+};
+
+type Shop = {
+  id: number;
+  name: string;
+  sellersCount: number;
 };
 
 const sellerNav = [
@@ -74,6 +81,7 @@ const sellerNav = [
 
 const adminNav = [
   { key: 'sellers', label: 'Продавцы', icon: 'Users' },
+  { key: 'shops', label: 'Магазины', icon: 'Store' },
   { key: 'allCustomers', label: 'Все покупатели', icon: 'Network' },
   { key: 'birthdays', label: 'Дни рождения', icon: 'Cake' },
   { key: 'profile', label: 'Профиль', icon: 'UserCog' },
@@ -96,7 +104,7 @@ export default function Index() {
     const v = localStorage.getItem('sellerId');
     return v ? Number(v) : null;
   });
-  const [email, setEmail] = useState(() => localStorage.getItem('sellerEmail') || '');
+  const [phone, setPhone] = useState(() => localStorage.getItem('sellerPhone') || '');
   const [role, setRole] = useState<'admin' | 'seller'>(() => (localStorage.getItem('sellerRole') as 'admin' | 'seller') || 'seller');
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
@@ -104,12 +112,13 @@ export default function Index() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
   const [sellers, setSellers] = useState<Seller[]>([]);
+  const [shops, setShops] = useState<Shop[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState<Form>(EMPTY_FORM);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detail, setDetail] = useState<{ customer: Customer; invited: Customer[] } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [inviteOpen, setInviteOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [birthdayCustomers, setBirthdayCustomers] = useState<BirthdayCustomer[]>([]);
   const [birthdayBonusAmount, setBirthdayBonusAmount] = useState(200);
@@ -186,49 +195,97 @@ export default function Index() {
     loadSellers(sellerId, sellerDateFrom, sellerDateTo);
     if (isAdmin) {
       loadAllCustomers(sellerId);
+      loadShops(sellerId);
     } else {
       loadCustomers(sellerId);
     }
     loadBirthdayCustomers(sellerId);
   }, [sellerId, isAdmin]);
 
-  const inviteSeller = async (inviteEmail: string, inviteName: string) => {
+  const registerSeller = async (sellerPhone: string, sellerName: string, shopId: string) => {
     try {
-      const res = await fetch(`${API_URL}?action=invite_seller`, {
+      const res = await fetch(`${API_URL}?action=register_seller`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
-        body: JSON.stringify({ email: inviteEmail, name: inviteName }),
+        body: JSON.stringify({ phone: sellerPhone, name: sellerName, shopId: shopId || null }),
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error || 'Не удалось создать приглашение');
+        toast.error(data.error || 'Не удалось зарегистрировать продавца');
         return null;
       }
-      await loadSellers(sellerId as number);
-      return data.inviteToken as string;
+      await loadSellers(sellerId as number, sellerDateFrom, sellerDateTo);
+      return { phone: data.phone as string, password: data.password as string };
     } catch {
       toast.error('Сервер недоступен');
       return null;
     }
   };
 
-  const resendInvite = async (id: number) => {
+  const resetSellerPassword = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}?action=resend_invite`, {
+      const res = await fetch(`${API_URL}?action=reset_seller_password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
         body: JSON.stringify({ id }),
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error || 'Не удалось создать новое приглашение');
+        toast.error(data.error || 'Не удалось сбросить пароль');
         return null;
       }
-      await loadSellers(sellerId as number, sellerDateFrom, sellerDateTo);
-      return data.inviteToken as string;
+      return { phone: data.phone as string, password: data.password as string };
     } catch {
       toast.error('Сервер недоступен');
       return null;
+    }
+  };
+
+  const loadShops = async (sid: number) => {
+    try {
+      const res = await fetch(`${API_URL}?action=list_shops`, { headers: { 'X-Seller-Id': String(sid) } });
+      const data = await res.json();
+      if (res.ok) setShops(data.shops || []);
+    } catch {
+      toast.error('Не удалось загрузить магазины');
+    }
+  };
+
+  const addShop = async (name: string) => {
+    try {
+      const res = await fetch(`${API_URL}?action=add_shop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось добавить магазин');
+        return;
+      }
+      toast.success('Магазин добавлен');
+      await loadShops(sellerId as number);
+    } catch {
+      toast.error('Сервер недоступен');
+    }
+  };
+
+  const deleteShop = async (id: number) => {
+    if (!window.confirm('Удалить магазин?')) return;
+    try {
+      const res = await fetch(`${API_URL}?action=delete_shop&id=${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Seller-Id': String(sellerId) },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось удалить магазин');
+        return;
+      }
+      toast.success('Магазин удалён');
+      await loadShops(sellerId as number);
+    } catch {
+      toast.error('Сервер недоступен');
     }
   };
 
@@ -426,8 +483,8 @@ export default function Index() {
   };
 
   const login = async () => {
-    if (!email.includes('@') || pass.length < 3) {
-      toast.error('Введите корректный email и пароль');
+    if (phone.replace(/\D/g, '').length < 8 || pass.length < 3) {
+      toast.error('Введите корректный телефон и пароль');
       return;
     }
     setBusy(true);
@@ -435,7 +492,7 @@ export default function Index() {
       const res = await fetch(`${API_URL}?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pass }),
+        body: JSON.stringify({ phone, password: pass }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -443,10 +500,10 @@ export default function Index() {
         return;
       }
       localStorage.setItem('sellerId', String(data.id));
-      localStorage.setItem('sellerEmail', data.email);
+      localStorage.setItem('sellerPhone', data.phone);
       localStorage.setItem('sellerRole', data.role);
       setSellerId(data.id);
-      setEmail(data.email);
+      setPhone(data.phone);
       setRole(data.role);
       setPass('');
       toast.success('Добро пожаловать в систему');
@@ -459,7 +516,7 @@ export default function Index() {
 
   const logout = () => {
     localStorage.removeItem('sellerId');
-    localStorage.removeItem('sellerEmail');
+    localStorage.removeItem('sellerPhone');
     localStorage.removeItem('sellerRole');
     setSellerId(null);
     setCustomers([]);
@@ -518,14 +575,14 @@ export default function Index() {
     }
   };
 
-  if (!authed) return <Login {...{ email, setEmail, pass, setPass, login, busy }} />;
+  if (!authed) return <Login {...{ phone, setPhone, pass, setPass, login, busy }} />;
 
   const nav = isAdmin ? adminNav : sellerNav;
   const activeTab = isAdmin && (tab === 'customers' || tab === 'points' || tab === 'vouchers') ? 'allCustomers' : tab;
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans flex flex-col">
-      <Header tab={activeTab} email={email} nav={nav} isAdmin={isAdmin} />
+      <Header tab={activeTab} phone={phone} nav={nav} isAdmin={isAdmin} />
       <div className="flex flex-1">
         <Sidebar tab={activeTab} setTab={setTab} nav={nav} />
         <main className="flex-1 p-5 md:p-8 max-w-[1400px] w-full mx-auto animate-fade-in pb-24 md:pb-8" key={activeTab}>
@@ -537,9 +594,9 @@ export default function Index() {
           {activeTab === 'sellers' && (
             <Sellers
               sellers={sellers}
-              setInviteOpen={setInviteOpen}
+              setRegisterOpen={setRegisterOpen}
               setSellerStatus={setSellerStatus}
-              resendInvite={resendInvite}
+              resetSellerPassword={resetSellerPassword}
               deleteSeller={deleteSeller}
               dateFrom={sellerDateFrom}
               dateTo={sellerDateTo}
@@ -548,6 +605,9 @@ export default function Index() {
               onResetDates={() => { setSellerDateFrom(''); setSellerDateTo(''); loadSellers(sellerId as number); }}
               isAdmin={isAdmin}
             />
+          )}
+          {isAdmin && activeTab === 'shops' && (
+            <Shops shops={shops} addShop={addShop} deleteShop={deleteShop} />
           )}
           {isAdmin && activeTab === 'allCustomers' && (
             <AllCustomers customers={allCustomers} openDetail={openDetail} onDelete={deleteCustomer} />
@@ -561,7 +621,7 @@ export default function Index() {
             />
           )}
           {activeTab === 'profile' && (
-            <Profile email={email} logout={logout} stats={stats} count={isAdmin ? allCustomers.length : customers.length} sellerId={sellerId as number} isAdmin={isAdmin} />
+            <Profile phone={phone} logout={logout} stats={stats} count={isAdmin ? allCustomers.length : customers.length} sellerId={sellerId as number} isAdmin={isAdmin} />
           )}
         </main>
       </div>
@@ -587,14 +647,14 @@ export default function Index() {
         busy={busy}
       />
       {isAdmin && (
-        <InviteSellerDialog open={inviteOpen} setOpen={setInviteOpen} inviteSeller={inviteSeller} />
+        <RegisterSellerDialog open={registerOpen} setOpen={setRegisterOpen} registerSeller={registerSeller} shops={shops} />
       )}
     </div>
   );
 }
 
-function Login({ email, setEmail, pass, setPass, login, busy }: {
-  email: string; setEmail: (v: string) => void;
+function Login({ phone, setPhone, pass, setPass, login, busy }: {
+  phone: string; setPhone: (v: string) => void;
   pass: string; setPass: (v: string) => void; login: () => void; busy: boolean;
 }) {
   return (
@@ -609,19 +669,18 @@ function Login({ email, setEmail, pass, setPass, login, busy }: {
         <p className="text-sm text-muted-foreground mb-6">Кабинет продавца и администратора</p>
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Электронная почта</Label>
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seller@company.ru" type="email" />
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Телефон</Label>
+            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 900 000-00-00" type="tel" />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Пароль</Label>
-            <PasswordInput value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && login()} />
+            <PasswordInput value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Пароль" onKeyDown={(e) => e.key === 'Enter' && login()} />
           </div>
           <Button className="w-full" onClick={login} disabled={busy}>
             <Icon name={busy ? 'Loader2' : 'LogIn'} size={16} className={`mr-2 ${busy ? 'animate-spin' : ''}`} />
             {busy ? 'Вход…' : 'Войти в систему'}
           </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground text-center mt-6">Демо-доступ: seller@company.ru / demo123</p>
       </div>
     </div>
   );
@@ -629,7 +688,7 @@ function Login({ email, setEmail, pass, setPass, login, busy }: {
 
 type NavItem = { key: string; label: string; icon: string };
 
-function Header({ tab, email, nav, isAdmin }: { tab: NavKey; email: string; nav: readonly NavItem[]; isAdmin: boolean }) {
+function Header({ tab, phone, nav, isAdmin }: { tab: NavKey; phone: string; nav: readonly NavItem[]; isAdmin: boolean }) {
   const title = nav.find((n) => n.key === tab)?.label;
   return (
     <header className="h-14 border-b border-border bg-card flex items-center px-5 gap-3 sticky top-0 z-20">
@@ -642,7 +701,7 @@ function Header({ tab, email, nav, isAdmin }: { tab: NavKey; email: string; nav:
       {isAdmin && <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold">Админ</span>}
       <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
         <Icon name="User" size={16} />
-        <span className="hidden sm:inline tabular">{email}</span>
+        <span className="hidden sm:inline tabular">{phone}</span>
       </div>
     </header>
   );
@@ -859,28 +918,27 @@ function Vouchers({ customers, spendVoucher }: { customers: Customer[]; spendVou
   );
 }
 
-function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, deleteSeller, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates, isAdmin }: {
-  sellers: Seller[]; setInviteOpen: (v: boolean) => void; setSellerStatus: (id: number, status: 'active' | 'blocked') => void;
-  resendInvite: (id: number) => Promise<string | null>;
+function Sellers({ sellers, setRegisterOpen, setSellerStatus, resetSellerPassword, deleteSeller, dateFrom, dateTo, onDateFromChange, onDateToChange, onResetDates, isAdmin }: {
+  sellers: Seller[]; setRegisterOpen: (v: boolean) => void; setSellerStatus: (id: number, status: 'active' | 'blocked') => void;
+  resetSellerPassword: (id: number) => Promise<{ phone: string; password: string } | null>;
   deleteSeller: (id: number) => void;
   dateFrom: string; dateTo: string;
   onDateFromChange: (v: string) => void; onDateToChange: (v: string) => void; onResetDates: () => void;
   isAdmin: boolean;
 }) {
-  const [resendBusyId, setResendBusyId] = useState<number | null>(null);
-  const [resendLink, setResendLink] = useState('');
+  const [resetBusyId, setResetBusyId] = useState<number | null>(null);
+  const [resetResult, setResetResult] = useState<{ phone: string; password: string } | null>(null);
 
-  const handleResend = async (id: number) => {
-    setResendBusyId(id);
-    const token = await resendInvite(id);
-    setResendBusyId(null);
-    if (token) {
-      setResendLink(`${window.location.origin}/invite?token=${token}`);
+  const handleReset = async (id: number) => {
+    setResetBusyId(id);
+    const result = await resetSellerPassword(id);
+    setResetBusyId(null);
+    if (result) {
+      setResetResult(result);
     }
   };
-  const statusLabel = { invited: 'Ждёт активации', active: 'Активен', blocked: 'Заблокирован' } as const;
+  const statusLabel = { active: 'Активен', blocked: 'Заблокирован' } as const;
   const statusClass = {
-    invited: 'bg-secondary text-muted-foreground',
     active: 'bg-accent/10 text-accent',
     blocked: 'bg-destructive/10 text-destructive',
   } as const;
@@ -917,13 +975,13 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, delete
         <div>
           <h1 className="text-xl font-bold font-display">Продавцы</h1>
           <p className="text-sm text-muted-foreground">
-            {isAdmin ? 'Приглашение и управление доступом продавцов' : 'Статистика продавцов команды'}
+            {isAdmin ? 'Регистрация и управление доступом продавцов' : 'Статистика продавцов команды'}
             {' · '}рейтинг по среднему числу покупателей за смену, за выбранный период
           </p>
         </div>
         {isAdmin && (
-          <Button onClick={() => setInviteOpen(true)}>
-            <Icon name="UserPlus" size={16} className="mr-2" /> Пригласить продавца
+          <Button onClick={() => setRegisterOpen(true)}>
+            <Icon name="UserPlus" size={16} className="mr-2" /> Зарегистрировать продавца
           </Button>
         )}
       </div>
@@ -955,7 +1013,8 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, delete
               <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-3 font-medium text-right">#</th>
                 <th className="px-4 py-3 font-medium">Имя</th>
-                {isAdmin && <th className="px-4 py-3 font-medium">Email (логин)</th>}
+                {isAdmin && <th className="px-4 py-3 font-medium">Телефон (логин)</th>}
+                {isAdmin && <th className="px-4 py-3 font-medium">Магазин</th>}
                 <th className="px-4 py-3 font-medium">Статус</th>
                 <th
                   className="px-4 py-3 font-medium text-right cursor-pointer select-none hover:text-foreground"
@@ -989,7 +1048,8 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, delete
                     )}
                     {s.name}
                   </td>
-                  {isAdmin && <td className="px-4 py-3 tabular text-muted-foreground">{s.email}</td>}
+                  {isAdmin && <td className="px-4 py-3 tabular text-muted-foreground">{s.phone}</td>}
+                  {isAdmin && <td className="px-4 py-3 text-muted-foreground">{s.shopName || '—'}</td>}
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusClass[s.status]}`}>
                       {statusLabel[s.status]}
@@ -1006,18 +1066,18 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, delete
                   {isAdmin && (
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-2">
-                        {s.role !== 'admin' && s.status === 'invited' && (
+                        {s.role !== 'admin' && (
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={resendBusyId === s.id}
-                            onClick={() => handleResend(s.id)}
+                            disabled={resetBusyId === s.id}
+                            onClick={() => handleReset(s.id)}
                           >
-                            <Icon name={resendBusyId === s.id ? 'Loader2' : 'RefreshCw'} size={14} className={`mr-1 ${resendBusyId === s.id ? 'animate-spin' : ''}`} />
-                            Отправить снова
+                            <Icon name={resetBusyId === s.id ? 'Loader2' : 'KeyRound'} size={14} className={`mr-1 ${resetBusyId === s.id ? 'animate-spin' : ''}`} />
+                            Сбросить пароль
                           </Button>
                         )}
-                        {s.role !== 'admin' && s.status !== 'invited' && (
+                        {s.role !== 'admin' && (
                           s.status === 'active' ? (
                             <Button size="sm" variant="outline" onClick={() => setSellerStatus(s.id, 'blocked')}>
                               <Icon name="Ban" size={14} className="mr-1" /> Заблокировать
@@ -1043,26 +1103,35 @@ function Sellers({ sellers, setInviteOpen, setSellerStatus, resendInvite, delete
         </div>
       </div>
 
-      <Dialog open={!!resendLink} onOpenChange={(v) => !v && setResendLink('')}>
+      <Dialog open={!!resetResult} onOpenChange={(v) => !v && setResetResult(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="font-display">Новая ссылка-приглашение</DialogTitle>
+            <DialogTitle className="font-display">Новый пароль</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">Отправьте эту ссылку продавцу — старая ссылка больше не действует.</p>
-          <div className="flex gap-2">
-            <Input value={resendLink} readOnly className="tabular text-xs" />
-            <Button
-              variant="outline"
-              onClick={() => {
-                navigator.clipboard.writeText(resendLink);
-                toast.success('Ссылка скопирована');
-              }}
-            >
-              <Icon name="Copy" size={16} />
-            </Button>
+          <p className="text-sm text-muted-foreground">Сообщите продавцу новые данные для входа — старый пароль больше не действует.</p>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Логин (телефон)</Label>
+              <Input value={resetResult?.phone || ''} readOnly className="tabular" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Пароль</Label>
+              <div className="flex gap-2">
+                <Input value={resetResult?.password || ''} readOnly className="tabular font-semibold" />
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(resetResult?.password || '');
+                    toast.success('Пароль скопирован');
+                  }}
+                >
+                  <Icon name="Copy" size={16} />
+                </Button>
+              </div>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setResendLink('')}>Готово</Button>
+            <Button variant="outline" onClick={() => setResetResult(null)}>Готово</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1143,74 +1212,99 @@ function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer
   );
 }
 
-function InviteSellerDialog({ open, setOpen, inviteSeller }: {
-  open: boolean; setOpen: (v: boolean) => void; inviteSeller: (email: string, name: string) => Promise<string | null>;
+function RegisterSellerDialog({ open, setOpen, registerSeller, shops }: {
+  open: boolean; setOpen: (v: boolean) => void;
+  registerSeller: (phone: string, name: string, shopId: string) => Promise<{ phone: string; password: string } | null>;
+  shops: Shop[];
 }) {
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [link, setLink] = useState('');
+  const [phone, setPhone] = useState('');
+  const [shopId, setShopId] = useState('');
+  const [result, setResult] = useState<{ phone: string; password: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const close = () => {
     setOpen(false);
     setName('');
-    setEmail('');
-    setLink('');
+    setPhone('');
+    setShopId('');
+    setResult(null);
   };
 
   const submit = async () => {
-    if (!email.includes('@')) {
-      toast.error('Введите корректный email');
+    if (phone.replace(/\D/g, '').length < 8) {
+      toast.error('Введите корректный номер телефона');
+      return;
+    }
+    if (!name.trim()) {
+      toast.error('Укажите имя продавца');
       return;
     }
     setBusy(true);
-    const token = await inviteSeller(email, name);
+    const res = await registerSeller(phone, name, shopId);
     setBusy(false);
-    if (token) {
-      const url = `${window.location.origin}/invite?token=${token}`;
-      setLink(url);
-      toast.success('Приглашение создано');
+    if (res) {
+      setResult(res);
+      toast.success('Продавец зарегистрирован');
     }
-  };
-
-  const copyLink = () => {
-    navigator.clipboard.writeText(link);
-    toast.success('Ссылка скопирована');
   };
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="font-display">Пригласить продавца</DialogTitle>
+          <DialogTitle className="font-display">Зарегистрировать продавца</DialogTitle>
         </DialogHeader>
-        {!link ? (
+        {!result ? (
           <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Магазин</Label>
+              <select value={shopId} onChange={(e) => setShopId(e.target.value)}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm">
+                <option value="">— не выбран —</option>
+                {shops.map((sh) => (
+                  <option key={sh.id} value={sh.id}>{sh.name}</option>
+                ))}
+              </select>
+            </div>
             <div className="space-y-1.5">
               <Label>Имя продавца</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Иванов Иван" />
             </div>
             <div className="space-y-1.5">
-              <Label>Email (будет логином)</Label>
-              <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seller@company.ru" type="email" />
+              <Label>Телефон (будет логином)</Label>
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 900 000-00-00" type="tel" />
             </div>
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Отправьте эту ссылку продавцу на почту — по ней он задаст пароль и войдёт в систему.</p>
-            <div className="flex gap-2">
-              <Input value={link} readOnly className="tabular text-xs" />
-              <Button variant="outline" onClick={copyLink}>
-                <Icon name="Copy" size={16} />
-              </Button>
+            <p className="text-sm text-muted-foreground">Сообщите продавцу эти данные для входа в систему.</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Логин (телефон)</Label>
+              <Input value={result.phone} readOnly className="tabular" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Пароль</Label>
+              <div className="flex gap-2">
+                <Input value={result.password} readOnly className="tabular font-semibold" />
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(result.password);
+                    toast.success('Пароль скопирован');
+                  }}
+                >
+                  <Icon name="Copy" size={16} />
+                </Button>
+              </div>
             </div>
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={close}>{link ? 'Готово' : 'Отмена'}</Button>
-          {!link && (
+          <Button variant="outline" onClick={close}>{result ? 'Готово' : 'Отмена'}</Button>
+          {!result && (
             <Button onClick={submit} disabled={busy}>
-              {busy ? 'Создание…' : 'Создать приглашение'}
+              {busy ? 'Регистрация…' : 'Зарегистрировать'}
             </Button>
           )}
         </DialogFooter>
@@ -1219,8 +1313,88 @@ function InviteSellerDialog({ open, setOpen, inviteSeller }: {
   );
 }
 
-function Profile({ email, logout, stats, count, sellerId, isAdmin }: {
-  email: string; logout: () => void; stats: Stats; count: number; sellerId: number; isAdmin: boolean;
+function Shops({ shops, addShop, deleteShop }: {
+  shops: Shop[]; addShop: (name: string) => void; deleteShop: (id: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!name.trim()) {
+      toast.error('Укажите название магазина');
+      return;
+    }
+    setBusy(true);
+    await addShop(name.trim());
+    setBusy(false);
+    setOpen(false);
+    setName('');
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl font-bold font-display">Магазины</h1>
+          <p className="text-sm text-muted-foreground">Справочник магазинов для привязки продавцов</p>
+        </div>
+        <Button onClick={() => setOpen(true)}>
+          <Icon name="Plus" size={16} className="mr-2" /> Добавить магазин
+        </Button>
+      </div>
+
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-3 font-medium">Название</th>
+                <th className="px-4 py-3 font-medium text-right">Продавцов</th>
+                <th className="px-4 py-3 font-medium text-right">Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shops.length === 0 && (
+                <tr><td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">Магазинов пока нет</td></tr>
+              )}
+              {shops.map((sh) => (
+                <tr key={sh.id} className="border-t border-border hover:bg-secondary/40 transition-colors">
+                  <td className="px-4 py-3 font-medium">{sh.name}</td>
+                  <td className="px-4 py-3 text-right tabular">{sh.sellersCount}</td>
+                  <td className="px-4 py-3 text-right">
+                    <Button size="sm" variant="outline" onClick={() => deleteShop(sh.id)}>
+                      <Icon name="Trash2" size={14} />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Новый магазин</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Название магазина</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Магазин на Ленина" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
+            <Button onClick={submit} disabled={busy}>{busy ? 'Сохранение…' : 'Добавить'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function Profile({ phone, logout, stats, count, sellerId, isAdmin }: {
+  phone: string; logout: () => void; stats: Stats; count: number; sellerId: number; isAdmin: boolean;
 }) {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -1275,7 +1449,7 @@ function Profile({ email, logout, stats, count, sellerId, isAdmin }: {
         </div>
         <div>
           <div className="font-semibold">{isAdmin ? 'Администратор' : 'Продавец'}</div>
-          <div className="text-sm text-muted-foreground tabular">{email}</div>
+          <div className="text-sm text-muted-foreground tabular">{phone}</div>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
