@@ -1,0 +1,1 @@
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS birthday_bonus_points NUMERIC DEFAULT 0;

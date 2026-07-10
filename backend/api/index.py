@@ -14,9 +14,10 @@ LIFETIME_CAP = 30
 VOUCHERS_PER_BATCH = 5
 POINTS_PER_REFERRAL = 1  # 1 балл (100 ₽) за каждого приведённого клиента, независимо от суммы его покупки
 LIFETIME_SHARE = 0.1  # доля временных баллов, уходящая в пожизненные
-BIRTHDAY_BONUS_AMOUNT = 200  # скидка в рублях к дню рождения
-BIRTHDAY_NOTIFY_DAYS_BEFORE = 7  # за сколько дней до ДР отправлять SMS
-BIRTHDAY_BONUS_WINDOW_DAYS = 10  # сколько календарных дней действует скидка с момента отправки SMS
+BIRTHDAY_BONUS_AMOUNT = 200  # сумма, упоминаемая в тексте SMS-поздравления
+BIRTHDAY_BONUS_POINTS = 2  # баллов начисляется к дню рождения
+BIRTHDAY_NOTIFY_DAYS_BEFORE = 7  # за сколько дней до ДР начислять баллы и отправлять SMS
+BIRTHDAY_BONUS_WINDOW_DAYS = 10  # упоминается в тексте SMS-поздравления
 
 CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -69,6 +70,7 @@ def _customer_dict(row) -> dict:
         'pointsRedeemedAmount': float(row['points_redeemed_amount']) if 'points_redeemed_amount' in keys else 0,
         'birthdayBonusNotifyDate': str(row['birthday_bonus_notify_date']) if row.get('birthday_bonus_notify_date') else None,
         'birthdayBonusUsedYear': row['birthday_bonus_used_year'] if 'birthday_bonus_used_year' in keys else None,
+        'birthdayBonusPoints': float(row['birthday_bonus_points']) if 'birthday_bonus_points' in keys and row['birthday_bonus_points'] is not None else 0,
         'notes': row['notes'] if 'notes' in keys and row['notes'] else '',
     }
 
@@ -95,31 +97,37 @@ def _send_sms(phone: str, text: str) -> bool:
         return False
 
 
+def _next_birthday(birth: dt.date, today: dt.date) -> dt.date:
+    try:
+        next_bd = birth.replace(year=today.year)
+    except ValueError:
+        next_bd = birth.replace(year=today.year, day=28)
+    if next_bd < today:
+        try:
+            next_bd = birth.replace(year=today.year + 1)
+        except ValueError:
+            next_bd = birth.replace(year=today.year + 1, day=28)
+    return next_bd
+
+
 def _birthday_window(customer_row) -> dict:
-    '''Возвращает статус ДР-бонуса: нужно ли уведомлять, действует ли скидка сейчас.'''
+    '''Возвращает статус ДР-бонуса: нужно ли начислять баллы, активны ли ещё начисленные баллы.
+    Баллы начисляются за BIRTHDAY_NOTIFY_DAYS_BEFORE дней до ДР и сгорают на следующий день после ДР, если не использованы.'''
     birth = customer_row.get('birth')
     if not birth:
-        return {'daysUntilBirthday': None, 'shouldNotify': False, 'bonusActive': False, 'bonusExpires': None}
+        return {'daysUntilBirthday': None, 'shouldNotify': False, 'bonusActive': False, 'bonusExpires': None, 'bonusPoints': 0}
     today = dt.date.today()
-    try:
-        next_birthday = birth.replace(year=today.year)
-    except ValueError:
-        next_birthday = birth.replace(year=today.year, day=28)
-    if next_birthday < today:
-        try:
-            next_birthday = birth.replace(year=today.year + 1)
-        except ValueError:
-            next_birthday = birth.replace(year=today.year + 1, day=28)
+    next_birthday = _next_birthday(birth, today)
     days_until = (next_birthday - today).days
 
     notify_date = customer_row.get('birthday_bonus_notify_date')
+    target_date = customer_row.get('birthday_bonus_target_date')
+    bonus_points = float(customer_row.get('birthday_bonus_points') or 0)
     bonus_active = False
     bonus_expires = None
-    if notify_date:
-        bonus_expires = notify_date + dt.timedelta(days=BIRTHDAY_BONUS_WINDOW_DAYS)
-        used_year = customer_row.get('birthday_bonus_used_year')
-        if today <= bonus_expires and used_year != next_birthday.year and used_year != (next_birthday.year - 1):
-            bonus_active = True
+    if notify_date and target_date and bonus_points > 0:
+        bonus_expires = target_date + dt.timedelta(days=1)  # день, когда баллы сгорают
+        bonus_active = today <= target_date  # активны по ДР включительно, на след. день сгорают
 
     should_notify = (
         days_until == BIRTHDAY_NOTIFY_DAYS_BEFORE
@@ -131,7 +139,43 @@ def _birthday_window(customer_row) -> dict:
         'shouldNotify': should_notify,
         'bonusActive': bonus_active,
         'bonusExpires': str(bonus_expires) if bonus_expires else None,
+        'bonusPoints': bonus_points,
+        'nextBirthday': next_birthday,
     }
+
+
+def _grant_birthday_bonus(cur, row, today: dt.date) -> bool:
+    '''Начисляет баллы к ДР, если ещё не начисляли на этот цикл дня рождения.'''
+    birth = row['birth']
+    next_birthday = _next_birthday(birth, today)
+    already_target = row.get('birthday_bonus_target_date')
+    already_points = float(row.get('birthday_bonus_points') or 0)
+    if already_target == next_birthday and already_points > 0:
+        return False
+    new_temp = round(float(row['temp_points']) + BIRTHDAY_BONUS_POINTS, 1)
+    new_total = round(float(row['total_earned_points']) + BIRTHDAY_BONUS_POINTS, 1)
+    cur.execute(
+        """UPDATE customers SET temp_points = %s, total_earned_points = %s,
+                  birthday_bonus_notify_date = %s, birthday_bonus_target_date = %s, birthday_bonus_points = %s
+           WHERE id = %s""",
+        (new_temp, new_total, today, next_birthday, BIRTHDAY_BONUS_POINTS, row['id']),
+    )
+    return True
+
+
+def _burn_expired_birthday_bonus(cur, row, today: dt.date) -> bool:
+    '''Сжигает неиспользованные ДР-баллы на следующий день после дня рождения.'''
+    target_date = row.get('birthday_bonus_target_date')
+    points = float(row.get('birthday_bonus_points') or 0)
+    if target_date and points > 0 and today > target_date:
+        new_temp = max(round(float(row['temp_points']) - points, 1), 0)
+        new_total = max(round(float(row['total_earned_points']) - points, 1), 0)
+        cur.execute(
+            "UPDATE customers SET temp_points = %s, total_earned_points = %s, birthday_bonus_points = 0 WHERE id = %s",
+            (new_temp, new_total, row['id']),
+        )
+        return True
+    return False
 
 
 def _seller_dict(row, show_password: bool = False) -> dict:
@@ -642,14 +686,17 @@ def handler(event: dict, context) -> dict:
                 info = _birthday_window(r)
                 if info['daysUntilBirthday'] is None:
                     continue
-                # Автоматическая отправка SMS за BIRTHDAY_NOTIFY_DAYS_BEFORE дней до ДР при заходе в систему
+                # Сжигаем баллы, не потраченные до следующего дня после ДР
+                if _burn_expired_birthday_bonus(cur, r, today):
+                    cur.execute("SELECT c.*, s.name AS seller_name, s.phone AS seller_phone FROM customers c JOIN sellers s ON s.id = c.seller_id WHERE c.id = %s", (r['id'],))
+                    r = cur.fetchone()
+                    info = _birthday_window(r)
+                # Автоматическое начисление баллов + SMS за BIRTHDAY_NOTIFY_DAYS_BEFORE дней до ДР при заходе в систему
                 if info['shouldNotify']:
                     text = f"{r['name'].split(' ')[0]}, с наступающим Днём рождения! Дарим скидку {BIRTHDAY_BONUS_AMOUNT} ₽ на покупку в течение {BIRTHDAY_BONUS_WINDOW_DAYS} дней."
                     if _send_sms(r['phone'], text):
-                        cur.execute(
-                            "UPDATE customers SET birthday_bonus_notify_date = %s WHERE id = %s RETURNING *",
-                            (today, r['id']),
-                        )
+                        _grant_birthday_bonus(cur, r, today)
+                        cur.execute("SELECT c.*, s.name AS seller_name, s.phone AS seller_phone FROM customers c JOIN sellers s ON s.id = c.seller_id WHERE c.id = %s", (r['id'],))
                         r = cur.fetchone()
                         info = _birthday_window(r)
                         auto_sent += 1
@@ -663,7 +710,7 @@ def handler(event: dict, context) -> dict:
                     })
                     result.append(item)
             result.sort(key=lambda x: x['daysUntilBirthday'])
-            return _resp(200, {'customers': result, 'bonusAmount': BIRTHDAY_BONUS_AMOUNT, 'autoSent': auto_sent})
+            return _resp(200, {'customers': result, 'bonusAmount': BIRTHDAY_BONUS_AMOUNT, 'bonusPoints': BIRTHDAY_BONUS_POINTS, 'autoSent': auto_sent})
 
         if method == 'POST' and action == 'send_birthday_sms':
             cid = int(body.get('id'))
@@ -676,27 +723,8 @@ def handler(event: dict, context) -> dict:
             sent = _send_sms(row['phone'], text)
             if not sent:
                 return _resp(502, {'error': 'Не удалось отправить SMS. Проверьте баланс и ключ SMS.ru'})
-            cur.execute(
-                "UPDATE customers SET birthday_bonus_notify_date = %s WHERE id = %s RETURNING *",
-                (today, cid),
-            )
-            updated = cur.fetchone()
-            return _resp(200, {'customer': _customer_dict(updated)})
-
-        if method == 'POST' and action == 'use_birthday_bonus':
-            cid = int(body.get('id'))
+            _grant_birthday_bonus(cur, row, today)
             cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
-            row = cur.fetchone()
-            if not row:
-                return _resp(404, {'error': 'Покупатель не найден'})
-            info = _birthday_window(row)
-            if not info['bonusActive']:
-                return _resp(400, {'error': 'Скидка ко дню рождения сейчас не активна'})
-            used_year = dt.date.today().year if row['birthday_bonus_notify_date'] is None else row['birthday_bonus_notify_date'].year
-            cur.execute(
-                "UPDATE customers SET birthday_bonus_used_year = %s WHERE id = %s RETURNING *",
-                (used_year, cid),
-            )
             updated = cur.fetchone()
             return _resp(200, {'customer': _customer_dict(updated)})
 

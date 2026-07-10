@@ -124,7 +124,7 @@ export default function Index() {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [birthdayCustomers, setBirthdayCustomers] = useState<BirthdayCustomer[]>([]);
-  const [birthdayBonusAmount, setBirthdayBonusAmount] = useState(200);
+  const [birthdayBonusPoints, setBirthdayBonusPoints] = useState(2);
   const [sellerDateFrom, setSellerDateFrom] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
@@ -183,9 +183,9 @@ export default function Index() {
       const data = await res.json();
       if (res.ok) {
         setBirthdayCustomers(data.customers || []);
-        setBirthdayBonusAmount(data.bonusAmount ?? 200);
+        setBirthdayBonusPoints(data.bonusPoints ?? 2);
         if (data.autoSent > 0) {
-          toast.success(`Автоматически отправлено SMS: ${data.autoSent}`, { icon: '🎂' });
+          toast.success(`Автоматически начислены баллы и отправлено SMS: ${data.autoSent}`, { icon: '🎂' });
         }
       }
     } catch {
@@ -397,25 +397,6 @@ export default function Index() {
     }
   };
 
-  const useBirthdayBonus = async (id: number) => {
-    try {
-      const res = await fetch(`${API_URL}?action=use_birthday_bonus`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
-        body: JSON.stringify({ id }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || 'Не удалось применить скидку');
-        return;
-      }
-      toast.success('Скидка ко дню рождения применена');
-      await loadBirthdayCustomers(sellerId as number);
-    } catch {
-      toast.error('Сервер недоступен');
-    }
-  };
-
   const saveEditedCustomer = async (payload: Partial<Form> & { id: number }) => {
     setBusy(true);
     try {
@@ -618,9 +599,8 @@ export default function Index() {
           {activeTab === 'birthdays' && (
             <Birthdays
               customers={birthdayCustomers}
-              bonusAmount={birthdayBonusAmount}
+              bonusPoints={birthdayBonusPoints}
               sendSms={sendBirthdaySms}
-              useBonus={useBirthdayBonus}
             />
           )}
           {activeTab === 'profile' && (
@@ -1852,11 +1832,10 @@ function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
   );
 }
 
-function Birthdays({ customers, bonusAmount, sendSms, useBonus }: {
+function Birthdays({ customers, bonusPoints, sendSms }: {
   customers: BirthdayCustomer[];
-  bonusAmount: number;
+  bonusPoints: number;
   sendSms: (id: number) => void;
-  useBonus: (id: number) => void;
 }) {
   const upcoming = customers.filter((c) => !c.bonusActive).sort((a, b) => a.daysUntilBirthday - b.daysUntilBirthday);
   const active = customers.filter((c) => c.bonusActive);
@@ -1866,14 +1845,14 @@ function Birthdays({ customers, bonusAmount, sendSms, useBonus }: {
       <div>
         <h1 className="text-xl font-bold font-display">Дни рождения</h1>
         <p className="text-sm text-muted-foreground">
-          За 7 дней до дня рождения клиенту можно отправить SMS со скидкой {bonusAmount} ₽, действующей 10 календарных дней
+          За 7 дней до дня рождения клиенту начисляется {bonusPoints} балла и отправляется SMS. Баллы сгорают на следующий день после дня рождения, если их не потратить
         </p>
       </div>
 
       {active.length > 0 && (
         <div className="bg-card border border-border rounded-lg overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border bg-accent/10 text-xs uppercase tracking-wide text-accent font-medium">
-            Скидка активна ({active.length})
+            Баллы к ДР начислены ({active.length})
           </div>
           <div className="divide-y divide-border">
             {active.map((c) => (
@@ -1881,11 +1860,8 @@ function Birthdays({ customers, bonusAmount, sendSms, useBonus }: {
                 <div>
                   <div className="font-medium">{c.name}</div>
                   <div className="text-xs text-muted-foreground tabular">{c.phone} · ДР {c.birth}</div>
-                  <div className="text-xs text-accent mt-0.5">Скидка {bonusAmount} ₽ действует до {c.bonusExpires}</div>
+                  <div className="text-xs text-accent mt-0.5">Начислено {bonusPoints} балла · сгорят {c.bonusExpires}, если не использовать</div>
                 </div>
-                <Button size="sm" onClick={() => useBonus(c.id)}>
-                  <Icon name="Gift" size={14} className="mr-1.5" /> Применить скидку
-                </Button>
               </div>
             ))}
           </div>
