@@ -834,6 +834,7 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
               <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Ф.И.О.</th>
                 <th className="px-4 py-3 font-medium">Телефон</th>
+                <th className="px-4 py-3 font-medium">Дата рождения</th>
                 <th className="px-4 py-3 font-medium">Продавец</th>
                 <th className="px-4 py-3 font-medium">Пригласил</th>
                 <th className="px-4 py-3 font-medium">Товар</th>
@@ -847,12 +848,13 @@ function Customers({ customers, stats, setAddOpen, openDetail }: {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
+                <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
               )}
               {filtered.map((c: Customer) => (
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">{c.name}<div className="text-xs text-muted-foreground font-normal">с {c.joined}</div></td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
+                  <td className="px-4 py-3 tabular text-muted-foreground">{c.birth || '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.sellerName || '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground">{refName(c.refId)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.productName || '—'}</td>
@@ -1224,6 +1226,7 @@ function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer
               <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="px-4 py-3 font-medium">Ф.И.О.</th>
                 <th className="px-4 py-3 font-medium">Телефон</th>
+                <th className="px-4 py-3 font-medium">Дата рождения</th>
                 <th className="px-4 py-3 font-medium">Продавец</th>
                 <th className="px-4 py-3 font-medium">Товар</th>
                 <th className="px-4 py-3 font-medium text-right">Объём, ₽</th>
@@ -1235,12 +1238,13 @@ function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
+                <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">Ничего не найдено</td></tr>
               )}
               {filtered.map((c) => (
                 <tr key={c.id} onClick={() => openDetail(c.id)} className="border-t border-border hover:bg-secondary/40 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">{c.name}<div className="text-xs text-muted-foreground font-normal">с {c.joined}</div></td>
                   <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
+                  <td className="px-4 py-3 tabular text-muted-foreground">{c.birth || '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.sellerName}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.productName || '—'}</td>
                   <td className="px-4 py-3 text-right tabular">{c.purchaseAmount ? c.purchaseAmount.toLocaleString('ru') : '—'}</td>
