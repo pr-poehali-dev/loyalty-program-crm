@@ -1267,6 +1267,21 @@ function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer
   );
 }
 
+const BIRTHDAY_HIGHLIGHT_DAYS = 7;
+
+function daysUntilBirthday(birth: string): number {
+  const [, month, day] = birth.split('-').map(Number);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let next = new Date(today.getFullYear(), month - 1, day);
+  next.setHours(0, 0, 0, 0);
+  if (next < today) {
+    next = new Date(today.getFullYear() + 1, month - 1, day);
+    next.setHours(0, 0, 0, 0);
+  }
+  return Math.round((next.getTime() - today.getTime()) / 86400000);
+}
+
 function AllBirthdays({ customers }: { customers: Customer[] }) {
   const withBirth = customers.filter((c) => c.birth);
   const sorted = [...withBirth].sort((a, b) => {
@@ -1281,6 +1296,8 @@ function AllBirthdays({ customers }: { customers: Customer[] }) {
     return `${day}.${month}.${year}`;
   };
 
+  const soonCount = sorted.filter((c) => daysUntilBirthday(c.birth) <= BIRTHDAY_HIGHLIGHT_DAYS).length;
+
   return (
     <div className="space-y-6">
       <div>
@@ -1291,6 +1308,7 @@ function AllBirthdays({ customers }: { customers: Customer[] }) {
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat icon="Cake" label="Покупателей с указанной ДР" value={sorted.length} />
+        <Stat icon="PartyPopper" label="ДР сегодня или в ближайшие 7 дней" value={soonCount} accent />
       </div>
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -1307,14 +1325,33 @@ function AllBirthdays({ customers }: { customers: Customer[] }) {
               {sorted.length === 0 && (
                 <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">Нет покупателей с указанной датой рождения</td></tr>
               )}
-              {sorted.map((c) => (
-                <tr key={c.id} className="border-t border-border">
-                  <td className="px-4 py-3 font-medium">{c.name}</td>
-                  <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.sellerName || '—'}</td>
-                  <td className="px-4 py-3 tabular text-muted-foreground">{formatBirth(c.birth)}</td>
-                </tr>
-              ))}
+              {sorted.map((c) => {
+                const days = daysUntilBirthday(c.birth);
+                const isToday = days === 0;
+                const isSoon = days > 0 && days <= BIRTHDAY_HIGHLIGHT_DAYS;
+                return (
+                  <tr key={c.id} className={`border-t border-border ${isToday ? 'bg-accent/15' : isSoon ? 'bg-accent/5' : ''}`}>
+                    <td className="px-4 py-3 font-medium">{c.name}</td>
+                    <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{c.sellerName || '—'}</td>
+                    <td className="px-4 py-3 tabular text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        {formatBirth(c.birth)}
+                        {isToday && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-medium shrink-0">
+                            Сегодня 🎂
+                          </span>
+                        )}
+                        {isSoon && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-accent/15 text-accent font-medium shrink-0">
+                            Через {days} дн.
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
