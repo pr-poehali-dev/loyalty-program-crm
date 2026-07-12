@@ -30,6 +30,7 @@ type Customer = {
   lifePoints: number;
   vouchers: number;
   purchases: number;
+  vouchersBatchAt?: string | null;
   joined: string;
   productName: string;
   purchaseAmount: number;
@@ -51,6 +52,14 @@ type BirthdayCustomer = Customer & {
   shouldNotify: boolean;
   bonusActive: boolean;
   bonusExpires: string | null;
+};
+
+type PurchaseRecord = {
+  id: number;
+  productName: string;
+  purchaseAmount: number;
+  purchaseDate: string;
+  vouchersGranted: number;
 };
 
 type Seller = {
@@ -119,10 +128,11 @@ export default function Index() {
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState<Form>(EMPTY_FORM);
   const [detailId, setDetailId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<{ customer: Customer; invited: Customer[] } | null>(null);
+  const [detail, setDetail] = useState<{ customer: Customer; invited: Customer[]; purchaseHistory: PurchaseRecord[] } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [purchaseCustomer, setPurchaseCustomer] = useState<Customer | null>(null);
   const [birthdayCustomers, setBirthdayCustomers] = useState<BirthdayCustomer[]>([]);
   const [birthdayBonusPoints, setBirthdayBonusPoints] = useState(2);
   const [sellerDateFrom, setSellerDateFrom] = useState(() => {
@@ -420,6 +430,33 @@ export default function Index() {
     }
   };
 
+  const addPurchase = async (payload: { id: number; productName: string; purchaseAmount: string; purchaseDate: string }) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`${API_URL}?action=add_purchase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seller-Id': String(sellerId) },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Не удалось сохранить покупку');
+        return;
+      }
+      if (data.vouchersGranted > 0) {
+        toast.success(`Покупка добавлена, выдана новая партия фиолок: ${data.vouchersGranted} шт.`, { icon: '🎟️' });
+      } else {
+        toast.success('Покупка добавлена. Новая партия фиолок не выдана: пришло меньше 3 приглашённых по предыдущей партии');
+      }
+      await refreshAfterMutation();
+      setPurchaseCustomer(null);
+    } catch {
+      toast.error('Сервер недоступен');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const deleteCustomer = async (id: number) => {
     if (!window.confirm('Удалить покупателя без возможности восстановления?')) return;
     setBusy(true);
@@ -620,6 +657,7 @@ export default function Index() {
         onComplete={completeRegistration}
         onRedeemPoints={redeemPoints}
         onDelete={deleteCustomer}
+        onAddPurchase={(c) => setPurchaseCustomer(c)}
         busy={busy}
       />
       <EditCustomerDialog
@@ -627,6 +665,12 @@ export default function Index() {
         onClose={() => setEditCustomer(null)}
         onSave={saveEditedCustomer}
         allCustomers={isAdmin ? allCustomers : customers}
+        busy={busy}
+      />
+      <AddPurchaseDialog
+        customer={purchaseCustomer}
+        onClose={() => setPurchaseCustomer(null)}
+        onSave={addPurchase}
         busy={busy}
       />
       {isAdmin && (
@@ -1573,14 +1617,15 @@ function AddDialog({ addOpen, setAddOpen, form, setForm, addCustomer, customers,
   );
 }
 
-function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, onEdit, onComplete, onRedeemPoints, onDelete, busy }: {
+function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, onEdit, onComplete, onRedeemPoints, onDelete, onAddPurchase, busy }: {
   open: boolean; onOpenChange: (v: boolean) => void; loading: boolean;
-  detail: { customer: Customer; invited: Customer[] } | null;
+  detail: { customer: Customer; invited: Customer[]; purchaseHistory: PurchaseRecord[] } | null;
   isAdmin: boolean;
   onEdit: (c: Customer) => void;
   onComplete: (id: number) => void;
   onRedeemPoints: (id: number, amount: number) => void;
   onDelete: (id: number) => void;
+  onAddPurchase: (c: Customer) => void;
   busy: boolean;
 }) {
   const canEdit = !!detail && (isAdmin || !detail.customer.registrationCompleted);
@@ -1627,6 +1672,36 @@ function CustomerDetailDialog({ open, onOpenChange, loading, detail, isAdmin, on
                 <p className="text-sm whitespace-pre-wrap">{detail.customer.notes}</p>
               </div>
             )}
+
+            <div className="bg-card border border-border rounded-lg overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-border bg-secondary/70 text-xs uppercase tracking-wide text-muted-foreground font-medium flex items-center justify-between">
+                <span>История покупок ({detail.purchaseHistory.length})</span>
+                <span>Фиолок: {detail.customer.vouchers}</span>
+              </div>
+              <div className="divide-y divide-border max-h-56 overflow-y-auto">
+                {detail.purchaseHistory.map((p) => (
+                  <div key={p.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
+                    <div>
+                      <div className="font-medium">{p.productName || 'Без названия товара'}</div>
+                      <div className="text-xs text-muted-foreground tabular">{p.purchaseDate}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-muted-foreground tabular">
+                        {p.purchaseAmount ? `${p.purchaseAmount.toLocaleString('ru')} ₽` : '—'}
+                      </div>
+                      {p.vouchersGranted > 0 && (
+                        <div className="text-xs text-accent">+{p.vouchersGranted} фиолок</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="px-4 py-2.5 border-t border-border">
+                <Button size="sm" variant="outline" className="w-full" onClick={() => onAddPurchase(detail.customer)}>
+                  <Icon name="ShoppingBag" size={14} className="mr-1.5" /> Повторная покупка
+                </Button>
+              </div>
+            </div>
 
             <div className="bg-card border border-border rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-border bg-secondary/70 text-xs uppercase tracking-wide text-muted-foreground font-medium">
@@ -1825,6 +1900,69 @@ function EditCustomerDialog({ customer, onClose, onSave, allCustomers, busy }: {
           <Button variant="outline" onClick={onClose} disabled={busy}>Отмена</Button>
           <Button onClick={save} disabled={busy}>
             {busy ? 'Сохранение…' : 'Сохранить изменения'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AddPurchaseDialog({ customer, onClose, onSave, busy }: {
+  customer: Customer | null;
+  onClose: () => void;
+  onSave: (payload: { id: number; productName: string; purchaseAmount: string; purchaseDate: string }) => void;
+  busy: boolean;
+}) {
+  const [productName, setProductName] = useState('');
+  const [purchaseAmount, setPurchaseAmount] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState('');
+
+  useEffect(() => {
+    if (customer) {
+      setProductName('');
+      setPurchaseAmount('');
+      setPurchaseDate('');
+    }
+  }, [customer]);
+
+  if (!customer) return null;
+
+  const save = () => {
+    onSave({ id: customer.id, productName, purchaseAmount, purchaseDate });
+  };
+
+  return (
+    <Dialog open={!!customer} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="font-display">Повторная покупка</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            {customer.name} · {customer.phone}
+          </p>
+          <div className="space-y-1.5">
+            <Label>Наименование товара</Label>
+            <Input value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Например, кроссовки Air Max" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Объём покупки, ₽</Label>
+              <Input type="number" min="0" value={purchaseAmount} onChange={(e) => setPurchaseAmount(e.target.value)} placeholder="0" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Дата покупки</Label>
+              <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Icon name="Ticket" size={13} /> Новая партия из 5 фиолок выдаётся, только если с момента последней выдачи покупатель привёл 3 и более новых покупателей
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Отмена</Button>
+          <Button onClick={save} disabled={busy}>
+            {busy ? 'Сохранение…' : 'Сохранить покупку'}
           </Button>
         </DialogFooter>
       </DialogContent>

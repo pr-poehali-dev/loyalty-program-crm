@@ -12,6 +12,7 @@ import psycopg2.extras
 RUB = 100
 LIFETIME_CAP = 30
 VOUCHERS_PER_BATCH = 5
+MIN_INVITED_FOR_NEW_VOUCHERS = 3  # минимум приглашённых по предыдущей партии фиолок, чтобы выдать новую
 POINTS_PER_REFERRAL = 1  # 1 балл (100 ₽) за каждого приведённого клиента, независимо от суммы его покупки
 LIFETIME_SHARE = 0.1  # доля временных баллов, уходящая в пожизненные
 BIRTHDAY_BONUS_AMOUNT = 200  # сумма, упоминаемая в тексте SMS-поздравления
@@ -57,6 +58,7 @@ def _customer_dict(row) -> dict:
         'lifePoints': float(row['life_points']),
         'vouchers': row['vouchers'],
         'purchases': row['purchases'],
+        'vouchersBatchAt': str(row['vouchers_batch_at']) if row.get('vouchers_batch_at') else None,
         'joined': str(row['joined']),
         'productName': row['product_name'] or '',
         'purchaseAmount': float(row['purchase_amount']) if row['purchase_amount'] is not None else 0,
@@ -72,6 +74,16 @@ def _customer_dict(row) -> dict:
         'birthdayBonusUsedYear': row['birthday_bonus_used_year'] if 'birthday_bonus_used_year' in keys else None,
         'birthdayBonusPoints': float(row['birthday_bonus_points']) if 'birthday_bonus_points' in keys and row['birthday_bonus_points'] is not None else 0,
         'notes': row['notes'] if 'notes' in keys and row['notes'] else '',
+    }
+
+
+def _purchase_dict(row) -> dict:
+    return {
+        'id': row['id'],
+        'productName': row['product_name'] or '',
+        'purchaseAmount': float(row['purchase_amount']) if row['purchase_amount'] is not None else 0,
+        'purchaseDate': str(row['purchase_date']) if row['purchase_date'] else '',
+        'vouchersGranted': row['vouchers_granted'],
     }
 
 
@@ -409,6 +421,7 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return _resp(404, {'error': 'Покупатель не найден'})
             cur.execute("UPDATE customers SET ref_id = NULL WHERE ref_id = %s", (cid,))
+            cur.execute("DELETE FROM purchases WHERE customer_id = %s", (cid,))
             cur.execute("DELETE FROM customers WHERE id = %s", (cid,))
             return _resp(200, {'ok': True})
 
@@ -441,9 +454,15 @@ def handler(event: dict, context) -> dict:
                 (int(cid),),
             )
             invited_rows = cur.fetchall()
+            cur.execute(
+                "SELECT * FROM purchases WHERE customer_id = %s ORDER BY purchase_date, id",
+                (int(cid),),
+            )
+            purchase_rows = cur.fetchall()
             return _resp(200, {
                 'customer': _customer_dict(row),
                 'invited': [_customer_dict(r) for r in invited_rows],
+                'purchaseHistory': [_purchase_dict(p) for p in purchase_rows],
             })
 
         if method == 'POST' and action == 'complete_registration':
@@ -602,11 +621,16 @@ def handler(event: dict, context) -> dict:
             vouchers = VOUCHERS_PER_BATCH
             cur.execute(
                 """INSERT INTO customers
-                   (seller_id, name, phone, birth, type, ref_id, vouchers, product_name, purchase_amount, purchase_date, notes)
-                   VALUES (%s, %s, %s, %s, 'customer', %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s) RETURNING *""",
-                (seller_id, name, phone, birth, ref_id, vouchers, product_name, purchase_amount, purchase_date, notes),
+                   (seller_id, name, phone, birth, type, ref_id, vouchers, product_name, purchase_amount, purchase_date, notes, vouchers_batch_at)
+                   VALUES (%s, %s, %s, %s, 'customer', %s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s, COALESCE(%s, CURRENT_DATE)) RETURNING *""",
+                (seller_id, name, phone, birth, ref_id, vouchers, product_name, purchase_amount, purchase_date, notes, purchase_date),
             )
             new_row = cur.fetchone()
+            cur.execute(
+                """INSERT INTO purchases (customer_id, product_name, purchase_amount, purchase_date, vouchers_granted)
+                   VALUES (%s, %s, %s, COALESCE(%s, CURRENT_DATE), %s)""",
+                (new_row['id'], product_name, purchase_amount, purchase_date, vouchers),
+            )
 
             notify = None
             earned_points = None
@@ -632,6 +656,53 @@ def handler(event: dict, context) -> dict:
                     notify = ref['name'].split(' ')[0]
 
             return _resp(200, {'customer': _customer_dict(new_row), 'notify': notify, 'earnedPoints': earned_points})
+
+        if method == 'POST' and action == 'add_purchase':
+            cid = int(body.get('id'))
+            cur.execute("SELECT * FROM customers WHERE id = %s", (cid,))
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {'error': 'Покупатель не найден'})
+
+            product_name = (body.get('productName') or '').strip() or None
+            purchase_amount = body.get('purchaseAmount')
+            purchase_amount = float(purchase_amount) if purchase_amount not in (None, '') else None
+            purchase_date = body.get('purchaseDate') or None
+
+            # Считаем, сколько покупателей пригласил этот покупатель с момента последней выдачи ему фиолок
+            batch_at = row['vouchers_batch_at'] or row['created_at']
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM customers WHERE ref_id = %s AND created_at > %s",
+                (cid, batch_at),
+            )
+            invited_since_batch = cur.fetchone()['cnt']
+
+            vouchers_granted = 0
+            new_vouchers_batch_at = row['vouchers_batch_at']
+            if invited_since_batch >= MIN_INVITED_FOR_NEW_VOUCHERS:
+                vouchers_granted = VOUCHERS_PER_BATCH
+                new_vouchers_batch_at = dt.datetime.now()
+
+            new_vouchers = row['vouchers'] + vouchers_granted
+            new_purchases = row['purchases'] + 1
+            cur.execute(
+                """UPDATE customers SET vouchers = %s, purchases = %s, product_name = %s,
+                          purchase_amount = %s, purchase_date = COALESCE(%s, CURRENT_DATE),
+                          vouchers_batch_at = %s, points_redeemed = false, points_redeemed_amount = 0
+                   WHERE id = %s RETURNING *""",
+                (new_vouchers, new_purchases, product_name, purchase_amount, purchase_date, new_vouchers_batch_at, cid),
+            )
+            updated = cur.fetchone()
+            cur.execute(
+                """INSERT INTO purchases (customer_id, product_name, purchase_amount, purchase_date, vouchers_granted)
+                   VALUES (%s, %s, %s, COALESCE(%s, CURRENT_DATE), %s)""",
+                (cid, product_name, purchase_amount, purchase_date, vouchers_granted),
+            )
+            return _resp(200, {
+                'customer': _customer_dict(updated),
+                'vouchersGranted': vouchers_granted,
+                'invitedSinceLastBatch': invited_since_batch,
+            })
 
         if method == 'POST' and action == 'spend_voucher':
             cid = int(body.get('id'))
