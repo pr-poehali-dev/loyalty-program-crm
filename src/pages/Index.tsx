@@ -96,6 +96,7 @@ const adminNav = [
   { key: 'shops', label: 'Магазины', icon: 'Store' },
   { key: 'allCustomers', label: 'Все покупатели', icon: 'Network' },
   { key: 'birthdays', label: 'Дни рождения', icon: 'Cake' },
+  { key: 'birthdaysAll', label: 'Все ДР покупателей', icon: 'CalendarDays' },
   { key: 'profile', label: 'Профиль', icon: 'UserCog' },
 ] as const;
 
@@ -639,6 +640,9 @@ export default function Index() {
               bonusPoints={birthdayBonusPoints}
               sendSms={sendBirthdaySms}
             />
+          )}
+          {isAdmin && activeTab === 'birthdaysAll' && (
+            <AllBirthdays customers={allCustomers} />
           )}
           {activeTab === 'profile' && (
             <Profile phone={phone} logout={logout} stats={stats} count={isAdmin ? allCustomers.length : customers.length} sellerId={sellerId as number} isAdmin={isAdmin} />
@@ -1253,6 +1257,62 @@ function AllCustomers({ customers, openDetail, onDelete }: { customers: Customer
                       <Icon name="Trash2" size={14} />
                     </Button>
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AllBirthdays({ customers }: { customers: Customer[] }) {
+  const withBirth = customers.filter((c) => c.birth);
+  const sorted = [...withBirth].sort((a, b) => {
+    const [, aMonth, aDay] = a.birth.split('-').map(Number);
+    const [, bMonth, bDay] = b.birth.split('-').map(Number);
+    if (aMonth !== bMonth) return aMonth - bMonth;
+    return aDay - bDay;
+  });
+
+  const formatBirth = (birth: string) => {
+    const [year, month, day] = birth.split('-');
+    return `${day}.${month}.${year}`;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-bold font-display">Все ДР покупателей</h1>
+        <p className="text-sm text-muted-foreground">
+          Покупатели, у которых указана дата рождения, отсортированы по дню и месяцу (год рождения показан, но не влияет на порядок)
+        </p>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Stat icon="Cake" label="Покупателей с указанной ДР" value={sorted.length} />
+      </div>
+      <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-secondary/70 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-3 font-medium">Ф.И.О.</th>
+                <th className="px-4 py-3 font-medium">Телефон</th>
+                <th className="px-4 py-3 font-medium">Продавец</th>
+                <th className="px-4 py-3 font-medium">Дата рождения</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">Нет покупателей с указанной датой рождения</td></tr>
+              )}
+              {sorted.map((c) => (
+                <tr key={c.id} className="border-t border-border">
+                  <td className="px-4 py-3 font-medium">{c.name}</td>
+                  <td className="px-4 py-3 tabular text-muted-foreground">{c.phone}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{c.sellerName || '—'}</td>
+                  <td className="px-4 py-3 tabular text-muted-foreground">{formatBirth(c.birth)}</td>
                 </tr>
               ))}
             </tbody>
